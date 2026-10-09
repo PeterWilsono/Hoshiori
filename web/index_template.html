@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>星织 - 智能对话助手</title>
+
+    <!-- 样式文件 -->
+    <link rel="stylesheet" href="css/base.css?v=1767595725">
+    <link rel="stylesheet" href="css/themes.css?v=1767595725">
+    <link rel="stylesheet" href="css/components.css?v=1767595725">
+    <link rel="stylesheet" href="css/animations.css?v=1767595725">
+    
+    <!-- Live2D SDK - 使用本地备份避免CDN超时 -->
+    <!-- Cubism 4 核心 (始终需要) -->
+    <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js" 
+            onerror="console.error('Cubism Core加载失败，Live2D功能将不可用')"></script>
+    <!-- PixiJS -->
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js"
+            onerror="console.error('PixiJS加载失败，Live2D功能将不可用')"></script>
+    <!-- Cubism 4 -->
+    <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"
+            onerror="console.error('Cubism4加载失败，Live2D功能将不可用')"></script>
+
+    <!-- Eel JavaScript -->
+    <script type="text/javascript" src="/eel.js"></script>
+</head>
+
+<body data-theme="glass">
+    <!-- 主容器 -->
+    <div class="app-container">
+        <!-- 左侧角色视窗 -->
+        <aside class="avatar-section" id="avatarSection">
+            <!-- 角色立绘 -->
+            <div class="avatar-container">
+                <img id="avatarImage" src="" alt="角色立绘" class="avatar-image">
+            </div>
+
+            <!-- 状态卡片 -->
+            <div class="status-card glass-panel">
+                <!-- 好感度 -->
+                <div class="stat-group">
+                    <label class="stat-label">好感度 · Affection</label>
+                    <div class="stat-value" id="affectionValue">50</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="affectionBar" style="width: 50%"></div>
+                    </div>
+                </div>
+
+                <!-- 分隔线 -->
+                <div class="divider"></div>
+
+                <!-- 情绪 -->
+                <div class="stat-group">
+                    <label class="stat-label" id="moodLabel">情绪 · 平静</label>
+                </div>
+                
+                <!-- 分隔线 -->
+                <div class="divider"></div>
+                
+                <!-- 模型切换 -->
+                <div class="stat-group">
+                    <label class="stat-label">Live2D 模型</label>
+                    <button class="btn btn-sm btn-outline" onclick="openModelSelector()" style="margin-top: 5px; width: 100%;">
+                        🎭 切换模型
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 右侧聊天区域 -->
+        <main class="chat-section">
+            <!-- 顶部工具栏 -->
+            <header class="toolbar glass-panel">
+                <div class="toolbar-left">
+                    <h1 class="app-title">星织</h1>
+                </div>
+
+                <div class="toolbar-center">
+
+
+
+
+
+
+
+                </div>
+
+                <div class="toolbar-right">
+                    <!-- 新对话 -->
+                    <button class="btn btn-primary" onclick="newConversation()">
+                        ✨ 新对话
+                    </button>
+
+                    <!-- 对话列表 -->
+                    <button class="btn btn-ghost" onclick="showConversationList()">
+                        📋 历史
+                    </button>
+
+
+
+
+
+                    <!-- 设置 -->
+                    <button class="btn btn-ghost" onclick="openSettings()">
+                        ⚙ 设置
+                    </button>
+                </div>
+            </header>
+
+            <!-- 聊天内容区 -->
+            <div class="chat-container" id="chatContainer">
+                <div class="chat-messages" id="chatMessages">
+                    <!-- 消息将动态插入此处 -->
+                </div>
+            </div>
+
+            <!-- 底部输入区 -->
+            <footer class="input-section">
+                <div class="input-container glass-panel">
+                    <!-- 文件上传提示 -->
+                    <div class="file-indicator" id="fileIndicator" style="display: none;">
+                        <span id="fileInfo"></span>
+                        <button class="btn-icon" onclick="clearFile()">✖</button>
+                    </div>
+
+                    <!-- 输入框 -->
+                    <textarea id="messageInput" class="message-input" placeholder="输入消息..." rows="3"></textarea>
+
+                    <!-- 按钮组 -->
+                    <div class="input-buttons">
+                        <button class="btn-icon btn-upload" onclick="uploadFile()">
+                            📎
+                        </button>
+                        <button class="btn-icon btn-send" onclick="sendMessage()">
+                            ✈
+                        </button>
+                    </div>
+                </div>
+            </footer>
+        </main>
+    </div>
+
+    <!-- 模态窗口容器 -->
+    <div id="modalContainer"></div>
+
+    <!-- JavaScript文件 -->
+    <script src="js/utils.js?v=1767595725"></script>
+    <script src="js/theme.js?v=1767595725"></script>
+    <script src="js/chat.js?v=1767595725"></script>
+    <script src="js/main.js?v=1767595725"></script>
+</body>
+
+</html>

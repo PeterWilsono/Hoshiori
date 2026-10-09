@@ -1,0 +1,67 @@
+# 配置文件（包含API密钥等敏感信息）
+config.py
+baocun/config.json
+baocun/conversations.json
+
+# 用户数据
+baocun_test/
+
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 测试文件
+test_*.py
+
+# 开发文档和说明
+API提供商配置指南.md
+功能完整总结.md
+联网搜索功能说明.md
+联网搜索功能说明_最终版.md
+联网搜索问题诊断.md
+联网搜索修复说明.md
+对话顺序修复说明.md
+防刷新保护说明.md
+最终配置说明.md
+深度思考模式配置说明.md
+快速参考.txt
+🎯 快速参考.txt
+问题解决总结.md
+更新说明_v2.md
+缓存问题修复总结.md
+缓存问题解决方案.md
+✅ 缓存问题已完全解决.md
+分段回复测试说明.md
+测试清单.md
+给用户的更新说明.txt
+API_PROVIDER_FEATURE.md
+DEPLOYMENT_CHECKLIST.md
+EMOTION_SYSTEM_UPGRADE.md
+FINAL_SUMMARY.md
+IMPLEMENTATION_SUMMARY.md
+KouriChat_Technical_Details.txt
+KouriChat_vs_Hoshiori_Analysis.md
+Live2D立绘-快速开始.txt
+PHASE_2_3_COMPLETE.md
+README_UPDATE_SUGGESTION.md
+TESTING.md
+FEATURE_PREVIEW.txt
+UPDATE_LOG.md
+GPT-sovits.md
+快速开始 - 打包发布.md
+extracted_text.txt
+
+# 打包生成的文件
+*.spec
+build/
+dist/
+
+# IDE配置
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db

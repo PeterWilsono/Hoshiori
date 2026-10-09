@@ -1,0 +1,7 @@
+# TTS语音功能额外依赖
+pygame>=2.5.0
+requests>=2.28.0
+
+# 说明：
+# pygame - 用于音频播放
+# requests - 用于调用GPT-SoVITS API（已有）

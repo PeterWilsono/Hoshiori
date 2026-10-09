@@ -1,0 +1,371 @@
+/* ===== 主题系统 - 星织AI助手 ===== */
+/* 四种独特主题：幻境玻璃、软萌黏土、清新日系、深邃暗夜 */
+
+/* ========================================
+   🔮 幻境玻璃主题 (Glass) - 默认主题
+   ======================================== */
+body[data-theme="glass"] {
+    --bg-root: #0a0b0f;
+    --bg-primary: #141520;
+    --bg-secondary: #1a1b2e;
+    --bg-surface: #1e2030;
+    --bg-hover: #252740;
+
+    --text-primary: #e8e9f0;
+    --text-secondary: #b4b7c9;
+    --text-muted: #6b7089;
+    --text-ghost: #4a4d63;
+
+    --primary: #6366f1;
+    --primary-hover: #818cf8;
+    --primary-glow: rgba(99, 102, 241, 0.4);
+
+    --accent: #a78bfa;
+    --secondary: #8b5cf6;
+    --secondary-hover: #a78bfa;
+
+    --info: #06b6d4;
+    --info-hover: #22d3ee;
+
+    --border-glass: rgba(139, 92, 246, 0.15);
+    --border-glow: rgba(167, 139, 250, 0.3);
+    --border-accent: rgba(167, 139, 250, 0.5);
+
+    --user-bubble: #2d2f45;
+    --user-text: #e8e9f0;
+
+    --ai-bubble: rgba(26, 27, 46, 0.6);
+    --ai-text: #b4b7c9;
+    --ai-bubble-border: rgba(139, 92, 246, 0.2);
+
+    --system-bubble: rgba(30, 32, 48, 0.8);
+    --system-text: #8b5cf6;
+    --system-bubble-border: rgba(139, 92, 246, 0.3);
+}
+
+/* 幻境玻璃：毛玻璃效果 */
+body[data-theme="glass"] .glass-panel {
+    background: rgba(30, 32, 48, 0.5);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--border-glass);
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        inset 0 0 20px rgba(139, 92, 246, 0.05);
+}
+
+/* 幻境玻璃：动态星空背景 */
+body[data-theme="glass"]::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background:
+        radial-gradient(circle at 20% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.1) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+body[data-theme="glass"] .message-bubble.ai {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+/* ========================================
+   ☁️ 软萌黏土主题 (Clay) - 新拟态设计
+   ======================================== */
+body[data-theme="clay"] {
+    --bg-root: #e0e5ec;
+    --bg-primary: #e0e5ec;
+    --bg-secondary: #e0e5ec;
+    --bg-surface: #e0e5ec;
+    --bg-hover: #d1d9e6;
+
+    --text-primary: #2d3748;
+    --text-secondary: #4a5568;
+    --text-muted: #718096;
+    --text-ghost: #a0aec0;
+
+    --primary: #9d8ec9;
+    --primary-hover: #b5a3d9;
+    --primary-glow: rgba(157, 142, 201, 0.4);
+
+    --accent: #d4a5d4;
+    --secondary: #a0c4e0;
+    --secondary-hover: #b8d4ed;
+
+    --info: #6bb5d4;
+    --info-hover: #8fc7e0;
+
+    --border-glass: #d1d9e6;
+    --border-glow: #b5a3d9;
+    --border-accent: #b5a3d9;
+
+    --user-bubble: #d1d9e6;
+    --user-text: #2d3748;
+
+    --ai-bubble: #f0f4f8;
+    --ai-text: #2d3748;
+    --ai-bubble-border: #d1d9e6;
+
+    --system-bubble: #e0e5ec;
+    --system-text: #9d8ec9;
+    --system-bubble-border: #d1d9e6;
+}
+
+/* 软萌黏土：凸起效果（新拟态） */
+body[data-theme="clay"] .glass-panel {
+    background: #e0e5ec;
+    border: none;
+    box-shadow:
+        9px 9px 16px rgba(163, 177, 198, 0.6),
+        -9px -9px 16px rgba(255, 255, 255, 0.5);
+    backdrop-filter: none;
+}
+
+body[data-theme="clay"] .btn,
+body[data-theme="clay"] .btn-icon {
+    box-shadow:
+        6px 6px 12px rgba(163, 177, 198, 0.6),
+        -6px -6px 12px rgba(255, 255, 255, 0.5);
+    border: none;
+}
+
+body[data-theme="clay"] .btn:active,
+body[data-theme="clay"] .btn-icon:active {
+    /* 按下时凹陷效果 */
+    box-shadow:
+        inset 5px 5px 10px rgba(163, 177, 198, 0.6),
+        inset -5px -5px 10px rgba(255, 255, 255, 0.5);
+}
+
+body[data-theme="clay"] .message-bubble {
+    box-shadow:
+        6px 6px 12px rgba(163, 177, 198, 0.4),
+        -6px -6px 12px rgba(255, 255, 255, 0.3);
+    border: none;
+    border-radius: 30px;
+}
+
+body[data-theme="clay"] .input-container {
+    box-shadow:
+        inset 5px 5px 10px rgba(163, 177, 198, 0.4),
+        inset -5px -5px 10px rgba(255, 255, 255, 0.5);
+}
+
+/* ========================================
+   🍃 清新日系主题 (Fresh) - 极简风格
+   ======================================== */
+body[data-theme="fresh"] {
+    --bg-root: #fdfbf7;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-surface: #ffffff;
+    --bg-hover: #f0f4f8;
+
+    --text-primary: #2c3e50;
+    --text-secondary: #5a6c7d;
+    --text-muted: #95a5a6;
+    --text-ghost: #bdc3c7;
+
+    --primary: #88c999;
+    --primary-hover: #a1d9b0;
+    --primary-glow: rgba(136, 201, 153, 0.3);
+
+    --accent: #7fb3d5;
+    --secondary: #f7dc6f;
+    --secondary-hover: #f9e79f;
+
+    --info: #1890ff;
+    --info-hover: #40a9ff;
+
+    --border-glass: #e8f0e8;
+    --border-glow: #c9e4d4;
+    --border-accent: #9ec9dd;
+
+    --user-bubble: #e8f5e9;
+    --user-text: #2c3e50;
+
+    --ai-bubble: #ffffff;
+    --ai-text: #2c3e50;
+    --ai-bubble-border: #e0e0e0;
+
+    --system-bubble: #f0f4f8;
+    --system-text: #7fb3d5;
+    --system-bubble-border: #e0e0e0;
+}
+
+/* 清新日系：纸质卡片效果 */
+body[data-theme="fresh"] .glass-panel {
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    backdrop-filter: none;
+}
+
+body[data-theme="fresh"] .message-bubble {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: 12px;
+}
+
+body[data-theme="fresh"] .btn,
+body[data-theme="fresh"] .btn-icon {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+body[data-theme="fresh"] .btn:hover,
+body[data-theme="fresh"] .btn-icon:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+}
+
+/* 清新日系：细微网格纹理背景 */
+body[data-theme="fresh"]::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image:
+        linear-gradient(rgba(0, 0, 0, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 0, 0, 0.02) 1px, transparent 1px);
+    background-size: 20px 20px;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* ========================================
+   🌙 深邃暗夜主题 (Dark) - 赛博朋克
+   ======================================== */
+body[data-theme="dark"] {
+    --bg-root: #000000;
+    --bg-primary: #0d0d0d;
+    --bg-secondary: #161616;
+    --bg-surface: #1a1a1a;
+    --bg-hover: #242424;
+
+    --text-primary: #ffffff;
+    --text-secondary: #d4d4d4;
+    --text-muted: #8c8c8c;
+    --text-ghost: #525252;
+
+    --primary: #3b82f6;
+    --primary-hover: #60a5fa;
+    --primary-glow: rgba(59, 130, 246, 0.5);
+
+    --accent: #8b5cf6;
+    --secondary: #06b6d4;
+    --secondary-hover: #22d3ee;
+
+    --info: #06b6d4;
+    --info-hover: #22d3ee;
+
+    --border-glass: rgba(59, 130, 246, 0.3);
+    --border-glow: rgba(139, 92, 246, 0.5);
+    --border-accent: rgba(6, 182, 212, 0.7);
+
+    --user-bubble: #1a1a1a;
+    --user-text: #ffffff;
+
+    --ai-bubble: rgba(13, 13, 13, 0.8);
+    --ai-text: #d4d4d4;
+    --ai-bubble-border: rgba(59, 130, 246, 0.3);
+
+    --system-bubble: rgba(22, 22, 22, 0.9);
+    --system-text: #8b5cf6;
+    --system-bubble-border: rgba(139, 92, 246, 0.3);
+}
+
+/* 深邃暗夜：霓虹发光效果 */
+body[data-theme="dark"] .glass-panel {
+    background: rgba(26, 26, 26, 0.6);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-glass);
+    box-shadow:
+        0 0 20px rgba(59, 130, 246, 0.2),
+        inset 0 0 20px rgba(59, 130, 246, 0.05);
+}
+
+body[data-theme="dark"] .message-bubble.user {
+    border: 1px solid var(--border-glass);
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
+}
+
+body[data-theme="dark"] .message-bubble.ai {
+    backdrop-filter: blur(8px);
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+}
+
+body[data-theme="dark"] .btn-primary {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+}
+
+body[data-theme="dark"] .btn-primary:hover {
+    box-shadow:
+        0 0 30px rgba(59, 130, 246, 0.6),
+        0 8px 16px rgba(59, 130, 246, 0.3);
+}
+
+/* 深邃暗夜：网格线动画背景 */
+body[data-theme="dark"]::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-image:
+        linear-gradient(rgba(59, 130, 246, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59, 130, 246, 0.05) 1px, transparent 1px);
+    background-size: 50px 50px;
+    animation: gridMove 20s linear infinite;
+    pointer-events: none;
+    z-index: 0;
+}
+
+@keyframes gridMove {
+    0% {
+        transform: translateY(0);
+    }
+
+    100% {
+        transform: translateY(50px);
+    }
+}
+
+/* 深邃暗夜：CRT扫描线效果 */
+body[data-theme="dark"]::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to bottom,
+            rgba(255, 255, 255, 0) 50%,
+            rgba(0, 0, 0, 0.02) 50%);
+    background-size: 100% 4px;
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0.3;
+}
+
+/* ========================================
+   通用主题过渡效果
+   ======================================== */
+body,
+.glass-panel,
+.message-bubble,
+.btn,
+.btn-icon {
+    transition:
+        background-color 0.5s ease,
+        color 0.5s ease,
+        border-color 0.5s ease,
+        box-shadow 0.5s ease;
+}

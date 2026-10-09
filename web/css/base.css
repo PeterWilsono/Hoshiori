@@ -1,0 +1,438 @@
+/* ===== 基础样式 - 星织AI助手 ===== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    /* 字体 */
+    --font-family: "Microsoft YaHei UI", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+
+    /* 间距 */
+    --spacing-xs: 8px;
+    --spacing-sm: 12px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+
+    /* 圆角 */
+    --radius-sm: 8px;
+    --radius-md: 15px;
+    --radius-lg: 24px;
+    --radius-xl: 28px;
+    --radius-full: 50px;
+
+    /* 过渡动画 */
+    --transition-fast: 0.2s ease;
+    --transition-normal: 0.3s ease;
+    --transition-slow: 0.5s ease;
+
+    /* Z-index层级 */
+    --z-avatar: 1;
+    --z-chat: 2;
+    --z-toolbar: 10;
+    --z-modal: 100;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: var(--font-family);
+}
+
+body {
+    background: var(--bg-root);
+    color: var(--text-primary);
+    transition: background-color var(--transition-slow), color var(--transition-slow);
+}
+
+/* ===== 主容器布局 ===== */
+.app-container {
+    display: flex;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* ===== 左侧角色视窗 ===== */
+.avatar-section {
+    width: 380px;
+    /* 增加宽度以更好地显示立绘 */
+    height: 100%;
+    background: var(--bg-secondary);
+    padding: var(--spacing-md);
+    /* 减小padding以留出更多空间给立绘 */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: transform var(--transition-normal), opacity var(--transition-normal);
+    z-index: var(--z-avatar);
+}
+
+.avatar-section.hidden {
+    transform: translateX(-100%);
+    opacity: 0;
+}
+
+.avatar-container {
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    position: relative;
+    margin-bottom: var(--spacing-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    /* 支持透明背景 */
+}
+
+.avatar-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    /* 改为contain以完整显示立绘，支持透明背景 */
+    transition: opacity var(--transition-normal);
+}
+
+/* ===== 状态卡片 ===== */
+.status-card {
+    width: 100%;
+    padding: var(--spacing-md);
+    flex-shrink: 0;
+}
+
+.stat-group {
+    text-align: center;
+}
+
+.stat-label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-ghost);
+    margin-bottom: var(--spacing-xs);
+    letter-spacing: 0.5px;
+}
+
+.stat-value {
+    font-size: 32px;
+    font-weight: bold;
+    color: var(--accent);
+    margin-bottom: var(--spacing-sm);
+    transition: color var(--transition-normal);
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--bg-hover);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    position: relative;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: var(--radius-full);
+    transition: width var(--transition-normal), background var(--transition-normal);
+}
+
+.divider {
+    height: 1px;
+    background: var(--border-glass);
+    margin: var(--spacing-md) 0;
+}
+
+/* ===== 右侧聊天区域 ===== */
+.chat-section {
+    flex: 1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    position: relative;
+    z-index: var(--z-chat);
+}
+
+/* ===== 顶部工具栏 ===== */
+.toolbar {
+    padding: var(--spacing-md) var(--spacing-lg);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-md);
+    z-index: var(--z-toolbar);
+}
+
+.toolbar-left,
+.toolbar-center,
+.toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.toolbar-center {
+    flex: 1;
+    justify-content: center;
+}
+
+.app-title {
+    font-size: 20px;
+    font-weight: bold;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+/* ===== 聊天容器 ===== */
+.chat-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--spacing-lg);
+    background: var(--bg-primary);
+    position: relative;
+}
+
+.chat-messages {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    min-height: 100%;
+}
+
+/* ===== 聊天气泡 ===== */
+.message-bubble {
+    max-width: 70%;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: var(--radius-lg);
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    line-height: 1.6;
+    animation: fadeInUp 0.4s ease;
+}
+
+.message-bubble.user {
+    align-self: flex-end;
+    background: var(--user-bubble);
+    color: var(--user-text);
+    border-bottom-right-radius: var(--radius-sm);
+}
+
+.message-bubble.ai {
+    align-self: flex-start;
+    background: var(--ai-bubble);
+    color: var(--ai-text);
+    border: 1px solid var(--ai-bubble-border);
+    border-bottom-left-radius: var(--radius-sm);
+}
+
+.message-bubble.system {
+    align-self: center;
+    background: var(--system-bubble);
+    color: var(--system-text);
+    border: 1px solid var(--system-bubble-border);
+    font-size: 13px;
+    max-width: 50%;
+}
+
+/* ===== 输入区域 ===== */
+.input-section {
+    padding: var(--spacing-lg);
+    background: transparent;
+}
+
+.input-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md) var(--spacing-lg);
+    position: relative;
+}
+
+.file-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-xs) var(--spacing-md);
+    background: var(--bg-hover);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--accent);
+}
+
+.message-input {
+    width: 100%;
+    min-height: 80px;
+    max-height: 200px;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-family: var(--font-family);
+    resize: vertical;
+    line-height: 1.5;
+}
+
+.message-input::placeholder {
+    color: var(--text-ghost);
+}
+
+.input-buttons {
+    display: flex;
+    gap: var(--spacing-sm);
+    justify-content: flex-end;
+}
+
+/* ===== 按钮基础样式 ===== */
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    font-family: var(--font-family);
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    white-space: nowrap;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+.btn-icon {
+    width: 50px;
+    height: 50px;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 20px;
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-icon:hover {
+    transform: scale(1.1);
+}
+
+.btn-send {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-send:hover {
+    background: var(--primary-hover);
+    box-shadow: 0 8px 20px var(--primary-glow, rgba(137, 180, 250, 0.3));
+}
+
+.btn-upload {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+}
+
+.btn-upload:hover {
+    background: var(--bg-hover);
+}
+
+/* ===== 按钮变体样式 ===== */
+.btn-primary {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--primary-hover);
+    box-shadow: 0 8px 16px var(--primary-glow, rgba(137, 180, 250, 0.3));
+}
+
+.btn-secondary {
+    background: var(--secondary);
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: var(--secondary-hover);
+}
+
+.btn-info {
+    background: var(--info);
+    color: white;
+}
+
+.btn-info:hover {
+    background: var(--info-hover);
+}
+
+.btn-ghost {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-glass);
+}
+
+.btn-ghost:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-glow);
+}
+
+/* ===== 滚动条样式 ===== */
+.chat-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.chat-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.chat-container::-webkit-scrollbar-thumb {
+    background: var(--bg-hover);
+    border-radius: var(--radius-full);
+    transition: background var(--transition-fast);
+}
+
+.chat-container::-webkit-scrollbar-thumb:hover {
+    background: var(--border-glass);
+}
+
+/* ===== 响应式设计 ===== */
+@media (max-width: 1024px) {
+    .avatar-section {
+        width: 280px;
+    }
+
+    .message-bubble {
+        max-width: 80%;
+    }
+}
+
+@media (max-width: 768px) {
+    .avatar-section {
+        position: absolute;
+        left: 0;
+        top: 0;
+        z-index: 50;
+    }
+
+    .toolbar {
+        flex-wrap: wrap;
+    }
+
+    .toolbar-center {
+        order: 3;
+        width: 100%;
+        margin-top: var(--spacing-sm);
+    }
+}
