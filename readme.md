@@ -409,8 +409,9 @@ pip install -r requirements.txt
 
 ## 📮 联系方式
 
-- 提交Issue: [GitHub Issues](https://github.com/yourusername/hoshiori-ai/issues)
-- 功能建议: [GitHub Discussions](https://github.com/yourusername/hoshiori-ai/discussions)
+- 提交Issue: [GitHub Issues](https://github.com/PeterWilsono/Hoshiori/issues)
+- 功能建议: [GitHub Discussions](https://github.com/PeterWilsono/Hoshiori/discussions)
+- 联系邮箱: 1206244538@qq.com
 
 ---
 
