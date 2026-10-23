@@ -370,19 +370,27 @@ class WebBridge:
                 
                 # 根据当前模式更新对应的属性
                 if settings['model_mode'] == 'local':
-                    if settings.get('api_endpoint'):
-                        self.app.config_manager.local_api_endpoint = settings['api_endpoint']
+                    # 本地端点固定为 LM Studio 默认地址，不接受用户修改
                     if settings.get('api_key'):
                         self.app.config_manager.local_api_key = settings['api_key']
                     if settings.get('model'):
                         self.app.config_manager.local_model = settings['model']
                 else:
-                    if settings.get('api_endpoint'):
-                        self.app.config_manager.online_api_endpoint = settings['api_endpoint']
+                    # ⭐ 在线模式：端点一律使用提供商预设值，用户无需也无法填写接入地址
+                    provider = settings.get('api_provider') or self.app.config_manager.api_provider
+                    preset = self.app.config_manager.API_PRESETS.get(provider)
+                    if preset:
+                        self.app.config_manager.online_api_endpoint = preset["endpoint"]
+                        # 模型：前端下拉选择优先，缺省则用预设默认模型
+                        if settings.get('model'):
+                            self.app.config_manager.online_model = settings['model']
+                        else:
+                            self.app.config_manager.online_model = preset["default_model"]
+                    elif settings.get('api_endpoint'):
+                        # 兜底：未知提供商时保留原值
+                        pass
                     if settings.get('api_key'):
                         self.app.config_manager.online_api_key = settings['api_key']
-                    if settings.get('model'):
-                        self.app.config_manager.online_model = settings['model']
                 
                 # 保存配置到文件
                 self.app.config_manager.save_config()

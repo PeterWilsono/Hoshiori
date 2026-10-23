@@ -216,7 +216,8 @@ class AIChatAppWeb:
                 api_config["api_endpoint"],
                 api_config["model"],
                 api_config.get("thinking_mode", "disabled"),  # ⭐ 传递思考模式
-                api_config.get("web_search_enabled", False)  # ⭐ 传递联网搜索开关
+                api_config.get("web_search_enabled", False),  # ⭐ 传递联网搜索开关
+                api_config.get("provider", "")  # ⭐ 传递提供商标识，用于适配请求参数
             )
             
             # 8. 调用API

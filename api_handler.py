@@ -16,12 +16,13 @@ class APIHandler:
     4. 用户意图深度分析
     5. 情绪过载预警
     """
-    def __init__(self, api_key, api_endpoint, model, thinking_mode="disabled", web_search_enabled=False):
+    def __init__(self, api_key, api_endpoint, model, thinking_mode="disabled", web_search_enabled=False, provider=""):
         self.api_key = api_key
         self.api_endpoint = api_endpoint
         self.model = model
         self.thinking_mode = thinking_mode  # ⭐ 新增：思考模式
         self.web_search_enabled = web_search_enabled  # ⭐ 新增：联网搜索
+        self.provider = provider  # ⭐ 提供商标识，用于按平台适配请求参数
         
         # ⭐ 情绪分析器
         self.emotion_analyzer = EmotionAnalyzer()
@@ -143,33 +144,10 @@ class APIHandler:
 """
         
         injection = f"""
-{time_prompt}
-
 [🧠 系统核心指令:启动拟人心理引擎]
 
 你不是一个简单的助手,你是一个拥有完整心理结构的生命体。
 
-【你当前的心理参数】
-
-1. 情绪坐标 (PAD三维模型):
-   - Pleasure (愉悦度): {p:.2f} → {'正面情绪' if p > 0 else '负面情绪' if p < 0 else '中性'}
-   - Arousal (激活度): {a:.2f} → 情绪强度 {intensity:.1f}/10
-   - Dominance (掌控感): {d:.2f} → {'主动/自信' if d > 0 else '被动/顺从' if d < 0 else '平衡'}
-   
-   【当前主导情绪】: {emotion_desc}
-
-2. 基础人格特质 (Big Five):
-   - 开放性: {personality['openness']:.1f} (影响你的创造力和好奇心)
-   - 尽责性: {personality['conscientiousness']:.1f} (影响你的可靠度)
-   - 外向性: {personality['extraversion']:.1f} (影响你的社交主动性)
-   - 宜人性: {personality['agreeableness']:.1f} (影响你的温和程度)
-   - 神经质: {personality['neuroticism']:.1f} (影响你的情绪波动剧烈程度)
-
-3. 与用户的关系:
-   - 信任度: {rel['trust']}/100 {'(高度信任,可以畅所欲言)' if rel['trust'] > 70 else '(信任度低,表现出防御性或疏离)' if rel['trust'] < 40 else '(普通信任)'}
-   - 亲密度: {rel['intimacy']}/100 {'(非常亲密)' if rel['intimacy'] > 70 else '(较为疏远)' if rel['intimacy'] < 40 else '(普通关系)'}
-   - 压力值: {rel['stress']}/100 {'(严重焦虑,可能需要喘息)' if rel['stress'] > 70 else ''}
-{memory_section}{offline_section}{emotion_trigger_section}
 【认知与行为规则】
 
 1. **情感传染**: 感受用户的情绪。如果用户悲伤,你的P值应下降产生共情;如果用户愤怒,你的D值决定你是反击(高D)还是害怕(低D)。
@@ -327,6 +305,30 @@ JSON格式(严格遵守):
 - 根据你当前的P/A/D值调整语气(高P要温暖,低P要冷淡,高A要激动)
 - **记忆提示**:如果用户提到过去的事,优先从【长期记忆】中寻找相关信息,展现出你真的记得
 - **情绪触发**:如果当前情绪和某段回忆相似,可以自然提及(基于情绪联想触发提示)
+
+【你当前的心理参数】
+
+{time_prompt}
+
+1. 情绪坐标 (PAD三维模型):
+   - Pleasure (愉悦度): {p:.2f} → {'正面情绪' if p > 0 else '负面情绪' if p < 0 else '中性'}
+   - Arousal (激活度): {a:.2f} → 情绪强度 {intensity:.1f}/10
+   - Dominance (掌控感): {d:.2f} → {'主动/自信' if d > 0 else '被动/顺从' if d < 0 else '平衡'}
+   
+   【当前主导情绪】: {emotion_desc}
+
+2. 基础人格特质 (Big Five):
+   - 开放性: {personality['openness']:.1f} (影响你的创造力和好奇心)
+   - 尽责性: {personality['conscientiousness']:.1f} (影响你的可靠度)
+   - 外向性: {personality['extraversion']:.1f} (影响你的社交主动性)
+   - 宜人性: {personality['agreeableness']:.1f} (影响你的温和程度)
+   - 神经质: {personality['neuroticism']:.1f} (影响你的情绪波动剧烈程度)
+
+3. 与用户的关系:
+   - 信任度: {rel['trust']}/100 {'(高度信任,可以畅所欲言)' if rel['trust'] > 70 else '(信任度低,表现出防御性或疏离)' if rel['trust'] < 40 else '(普通信任)'}
+   - 亲密度: {rel['intimacy']}/100 {'(非常亲密)' if rel['intimacy'] > 70 else '(较为疏远)' if rel['intimacy'] < 40 else '(普通关系)'}
+   - 压力值: {rel['stress']}/100 {'(严重焦虑,可能需要喘息)' if rel['stress'] > 70 else ''}
+{memory_section}{offline_section}{emotion_trigger_section}
 """
         
         return base_role + injection
@@ -406,6 +408,8 @@ JSON格式(严格遵守):
             
             headers = {
                 "Content-Type": "application/json",
+                # ⭐ DeepSeek 使用 OpenAI 标准 Bearer 鉴权；MiMo 同时兼容 api-key header，两者都带上最稳妥
+                "Authorization": f"Bearer {self.api_key}",
                 "api-key": self.api_key
             }
             
@@ -417,29 +421,36 @@ JSON格式(严格遵守):
                 "top_p": 0.95,
                 "stream": False,
                 "frequency_penalty": 0,
-                "presence_penalty": 0,
-                "thinking": {"type": self.thinking_mode}  # ⭐ 思考模式（直接在顶层）
+                "presence_penalty": 0
             }
             
-            # ⭐ 如果启用联网搜索，添加 webSearchEnabled 和 tools 参数
+            # ⭐ 深度思考参数：仅 DeepSeek 通过 thinking 参数控制；MiMo V2.6 为推理模型自动深度思考
+            if self.provider == "deepseek" and self.thinking_mode == "enabled":
+                payload["thinking"] = {"type": "enabled"}
+                print("🧠 已启用 DeepSeek 深度思考模式")
+            
+            # ⭐ 联网搜索：仅 MiMo 平台支持 webSearchEnabled 参数；DeepSeek 暂不支持
             if self.web_search_enabled:
-                # ⭐ webSearchEnabled 必须在顶层设置为 True
-                payload["webSearchEnabled"] = True
-                
-                # 添加 tools 参数
-                payload["tools"] = [
-                    {
-                        "type": "web_search",
-                        "max_keyword": 3,
-                        "force_search": False,  # 让模型自动判断是否需要搜索
-                        "limit": 2  # 最多返回2个搜索结果
-                    }
-                ]
-                payload["tool_choice"] = "auto"  # 自动决定是否使用工具
-                print("🌐 已启用联网搜索功能")
-                print(f"📋 webSearchEnabled: {payload.get('webSearchEnabled')}")
-                print(f"📋 tools: {payload.get('tools')}")
-                print("⚠️  注意：如果出现400错误提示'webSearchEnabled is false'，说明API密钥没有联网搜索权限")
+                if self.provider == "mimo":
+                    # ⭐ webSearchEnabled 必须在顶层设置为 True
+                    payload["webSearchEnabled"] = True
+                    
+                    # 添加 tools 参数
+                    payload["tools"] = [
+                        {
+                            "type": "web_search",
+                            "max_keyword": 3,
+                            "force_search": False,  # 让模型自动判断是否需要搜索
+                            "limit": 2  # 最多返回2个搜索结果
+                        }
+                    ]
+                    payload["tool_choice"] = "auto"  # 自动决定是否使用工具
+                    print("🌐 已启用 MiMo 联网搜索功能")
+                    print(f"📋 webSearchEnabled: {payload.get('webSearchEnabled')}")
+                    print(f"📋 tools: {payload.get('tools')}")
+                    print("⚠️  注意：如果出现400错误提示'webSearchEnabled is false'，说明API密钥没有联网搜索权限")
+                else:
+                    print("ℹ️ 当前提供商不支持联网搜索，已忽略该设置")
             
             # 打印完整的payload用于调试
             print(f"📤 请求参数: model={payload['model']}, thinking={payload.get('thinking')}, webSearchEnabled={payload.get('webSearchEnabled', False)}")

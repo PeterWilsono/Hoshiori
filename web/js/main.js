@@ -599,7 +599,7 @@ async function openSettings() {
         }
         
         // 构建模型选项（根据当前提供商）
-        const currentProvider = settings.api_provider || 'custom';
+        const currentProvider = settings.api_provider || 'mimo';
         const currentPreset = apiPresets[currentProvider];
         let modelOptions = '';
         
@@ -671,22 +671,23 @@ async function openSettings() {
                             ${providerOptions}
                         </select>
                         <p class="form-hint" style="margin-top: 5px; font-size: 12px; color: var(--text-secondary);">
-                            选择预设提供商会自动填充端点和模型
+                            💡 接入地址由系统自动配置，你只需填入下方 API Key 即可
                         </p>
                     </div>
                     ` : ''}
                     
                     <div class="form-group">
-                        <label class="form-label">API端点 (Endpoint)</label>
-                        <input type="text" class="form-input" id="settingApiEndpoint" value="${settings.api_endpoint || ''}" placeholder="http://localhost:1234/v1/chat/completions">
-                    </div>
-                    <div class="form-group">
                         <label class="form-label">API密钥 (Key)</label>
-                        <input type="password" class="form-input" id="settingApiKey" value="${settings.api_key || ''}" placeholder="sk-...">
+                        <input type="password" class="form-input" id="settingApiKey" value="${settings.api_key || ''}" placeholder="sk-..." autocomplete="off">
+                        <p class="form-hint" style="margin-top: 5px; font-size: 12px; color: var(--text-secondary);">
+                            ${settings.model_mode === 'online'
+                                ? '🔑 填入你申请的 API Key（DeepSeek 或 MiMo 平台）后保存即可使用'
+                                : '本地模式无需真实密钥'}
+                        </p>
                     </div>
                     <div class="form-group">
                         <label class="form-label">模型名称 (Model)</label>
-                        ${modelOptions ? `
+                        ${settings.model_mode === 'online' && modelOptions ? `
                         <select class="form-input" id="settingModel">
                             ${modelOptions}
                         </select>
@@ -705,7 +706,9 @@ async function openSettings() {
                             💡 开启深度思考：回答更准确但速度较慢，费用较高
                         </p>
                     </div>
+                    ` : ''}
                     
+                    ${settings.model_mode === 'online' && currentPreset && currentPreset.supports_web_search ? `
                     <div class="form-group">
                         <label class="form-label">🌐 联网搜索</label>
                         <select class="form-input" id="settingWebSearch">
@@ -773,11 +776,13 @@ async function saveSettings() {
         const webSearchElement = document.getElementById('settingWebSearch');
         const webSearchValue = webSearchElement ? (webSearchElement.value === 'true') : false;
         
+        // 提供商下拉仅在线模式存在；本地模式不覆盖提供商配置
+        const providerElement = document.getElementById('settingApiProvider');
+        
         const settings = {
             model_mode: document.getElementById('settingModelMode').value,
-            api_provider: document.getElementById('settingApiProvider')?.value || 'custom',
-            api_endpoint: document.getElementById('settingApiEndpoint').value,
-            api_key: document.getElementById('settingApiKey').value,
+            api_provider: providerElement ? providerElement.value : undefined,
+            api_key: document.getElementById('settingApiKey')?.value || '',
             model: modelValue,
             thinking_mode: thinkingValue,
             web_search_enabled: webSearchValue
