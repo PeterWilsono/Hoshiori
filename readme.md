@@ -70,6 +70,16 @@
 
 ---
 
+## 📦 下载（Windows 纯净版）
+
+👉 前往 [Releases 页面](https://github.com/PeterWilsono/Hoshiori/releases) 下载 `Hoshiori_v1.2.0_win64.zip`
+
+- 解压后双击 `Hoshiori.exe` 即可使用，无需安装 Python 环境
+- 首次使用：⚙ 设置 → 在线模式 → 选择 API 提供商（DeepSeek / MiMo）→ 选择模型 → 填入你的 API Key → 保存
+- 全新纯净状态，不含任何历史对话或测试数据
+
+---
+
 ## 🚀 快速开始
 
 ### 前置要求
