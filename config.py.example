@@ -6,48 +6,39 @@ class ConfigManager:
     """配置管理器 - 升级版（支持本地/在线模型切换）"""
     
     # ⭐ API提供商预设配置
+    # 说明：接入地址由预设固定，用户只需填入 API Key 即可，无需也无法修改端点
     API_PRESETS = {
         "deepseek": {
             "name": "DeepSeek",
             "endpoint": "https://api.deepseek.com/v1/chat/completions",
-            "default_model": "deepseek-chat",
+            "default_model": "deepseek-flash",
             "models": [
-                {"value": "deepseek-chat", "label": "deepseek-chat (标准模型，推荐)", "supports_thinking": True},
-                {"value": "deepseek-reasoner", "label": "deepseek-reasoner (推理模型)", "supports_thinking": True}
+                {"value": "deepseek-flash", "label": "deepseek-flash (标准模型，推荐)", "supports_thinking": True},
+                {"value": "deepseek-v4-pro", "label": "deepseek-v4-pro (专业模型)", "supports_thinking": True}
             ],
             "key_placeholder": "sk-...",
-            "description": "DeepSeek API - 通过参数控制是否启用深度思考",
+            "description": "DeepSeek API - 通过 thinking 参数控制是否启用深度思考",
             "thinking_modes": [
                 {"value": "disabled", "label": "关闭深度思考（快速模式）"},
                 {"value": "enabled", "label": "开启深度思考（专业模式）"}
-            ]
+            ],
+            "supports_web_search": False
         },
         "mimo": {
             "name": "Xiaomi MiMo",
             "endpoint": "https://api.xiaomimimo.com/v1/chat/completions",
-            "default_model": "mimo-v2.5-pro",
+            "default_model": "mimo-v2.6-pro",
             "models": [
-                {"value": "mimo-v2.5-pro", "label": "mimo-v2.5-pro (专业版，推荐)", "supports_thinking": True},
-                {"value": "mimo-v2.5", "label": "mimo-v2.5 (标准版)", "supports_thinking": True},
-                {"value": "mimo-v2-pro", "label": "mimo-v2-pro (旧版专业)", "supports_thinking": True},
-                {"value": "mimo-v2-omni", "label": "mimo-v2-omni (多模态)", "supports_thinking": True},
-                {"value": "mimo-v2-flash", "label": "mimo-v2-flash (快速版)", "supports_thinking": False}
+                {"value": "mimo-v2.6-pro", "label": "mimo-v2.6-pro (旗舰推理，推荐)", "supports_thinking": True},
+                {"value": "mimo-v2.6-flash", "label": "mimo-v2.6-flash (高效推理)", "supports_thinking": True},
+                {"value": "mimo-v2.5-pro", "label": "mimo-v2.5-pro (旧版专业)", "supports_thinking": True},
+                {"value": "mimo-v2.5", "label": "mimo-v2.5 (旧版标准)", "supports_thinking": True},
+                {"value": "mimo-v2-flash", "label": "mimo-v2-flash (旧版快速)", "supports_thinking": False}
             ],
             "key_placeholder": "sk-...",
-            "description": "小米MiMo API - 通过参数控制是否启用深度思考",
-            "thinking_modes": [
-                {"value": "disabled", "label": "关闭深度思考（快速模式）"},
-                {"value": "enabled", "label": "开启深度思考（专业模式）"}
-            ]
-        },
-        "custom": {
-            "name": "自定义",
-            "endpoint": "",
-            "default_model": "",
-            "models": [],
-            "key_placeholder": "输入您的API密钥",
-            "description": "自定义API配置",
-            "thinking_modes": []
+            "description": "小米MiMo API - V2.6 系列为推理模型，默认自动深度思考",
+            "thinking_modes": [],
+            "supports_web_search": True
         }
     }
     
@@ -59,7 +50,7 @@ class ConfigManager:
         self.model_mode = "online"  # "local" 或 "online"
         
         # ⭐ 新增：API提供商选择
-        self.api_provider = "mimo"  # "deepseek", "mimo", "custom"
+        self.api_provider = "mimo"  # "deepseek", "mimo"
         
         # ⭐ 新增：思考模式开关
         self.thinking_mode = "disabled"  # "disabled" 或 "enabled"
@@ -68,10 +59,9 @@ class ConfigManager:
         self.web_search_enabled = False  # True 或 False
         
         # 在线API配置
-        # ⚠️ 请在此处填写您自己的API密钥
         self.online_api_key = "YOUR_API_KEY_HERE"  # 替换为您的API密钥
         self.online_api_endpoint = "https://api.xiaomimimo.com/v1/chat/completions"
-        self.online_model = "mimo-v2.5-pro"
+        self.online_model = "mimo-v2.6-pro"  # ⭐ 默认使用 MiMo V2.6 旗舰推理模型
         
         # ⭐ 本地API配置（LM Studio）
         self.local_api_key = "lm-studio"  # 本地不需要真实key
@@ -120,6 +110,7 @@ class ConfigManager:
         """⭐ 根据当前模式返回API配置"""
         if self.model_mode == "local":
             return {
+                "provider": "local",
                 "api_key": self.local_api_key,
                 "api_endpoint": self.local_api_endpoint,
                 "model": self.local_model,
@@ -128,6 +119,7 @@ class ConfigManager:
             }
         else:  # online
             return {
+                "provider": self.api_provider,
                 "api_key": self.online_api_key,
                 "api_endpoint": self.online_api_endpoint,
                 "model": self.online_model,
@@ -140,15 +132,14 @@ class ConfigManager:
         return self.API_PRESETS
     
     def apply_api_preset(self, provider):
-        """应用API提供商预设"""
+        """应用API提供商预设（端点由预设固定，用户无需填写）"""
         if provider in self.API_PRESETS:
             self.api_provider = provider
             preset = self.API_PRESETS[provider]
             
-            # 只在非自定义模式下更新endpoint和model
-            if provider != "custom":
-                self.online_api_endpoint = preset["endpoint"]
-                self.online_model = preset["default_model"]
+            # 更新endpoint和默认模型
+            self.online_api_endpoint = preset["endpoint"]
+            self.online_model = preset["default_model"]
             
             self.save_config()
             return True
@@ -189,6 +180,9 @@ class ConfigManager:
                     config = json.load(f)
                     self.model_mode = config.get("model_mode", "local")
                     self.api_provider = config.get("api_provider", "mimo")
+                    # ⭐ 校验提供商：老配置可能存了已移除的 custom，回退到 mimo
+                    if self.api_provider not in self.API_PRESETS:
+                        self.api_provider = "mimo"
                     self.thinking_mode = config.get("thinking_mode", "disabled")
                     self.web_search_enabled = config.get("web_search_enabled", False)
                     self.online_api_key = config.get("online_api_key", self.online_api_key)
