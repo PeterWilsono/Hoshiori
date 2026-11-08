@@ -1,371 +1,333 @@
-/* ===== 主题系统 - 星织AI助手 ===== */
-/* 四种独特主题：幻境玻璃、软萌黏土、清新日系、深邃暗夜 */
+/* ============================================================
+   星织 · Hoshiori — 主题层
+   同一套版式，四种印刷品气质：
+   glass  夜航  · 墨蓝夜空 / 月光石
+   clay   朝霧  · 苔原晨雾 / 暖陶
+   fresh  纸白  · 象牙纸 / 墨蓝
+   dark   曜石  · 曜石黑 / 暖金
+   ============================================================ */
 
-/* ========================================
-   🔮 幻境玻璃主题 (Glass) - 默认主题
-   ======================================== */
+/* ------------------------------------------------------------
+   夜航 · Nocturne（默认）
+   ------------------------------------------------------------ */
 body[data-theme="glass"] {
-    --bg-root: #0a0b0f;
-    --bg-primary: #141520;
-    --bg-secondary: #1a1b2e;
-    --bg-surface: #1e2030;
-    --bg-hover: #252740;
+    --bg-app: #07090e;
+    --glass-highlight: rgba(255, 255, 255, 0.035);
+    --bg-chamber: #0a0d14;
+    --bg-chat: #090c12;
+    --bg-toolbar: rgba(9, 12, 18, 0.72);
+    --bg-elev: #10151e;
+    --fill-0: rgba(233, 238, 248, 0.03);
+    --fill-1: rgba(233, 238, 248, 0.06);
+    --fill-2: rgba(233, 238, 248, 0.1);
 
-    --text-primary: #e8e9f0;
-    --text-secondary: #b4b7c9;
-    --text-muted: #6b7089;
-    --text-ghost: #4a4d63;
+    --ink-1: #ece8df;
+    --ink-2: #b7bcc7;
+    --ink-3: #8b93a1;
+    --ink-4: #79808f;
 
-    --primary: #6366f1;
-    --primary-hover: #818cf8;
-    --primary-glow: rgba(99, 102, 241, 0.4);
+    --line: rgba(233, 238, 248, 0.09);
+    --line-strong: rgba(233, 238, 248, 0.17);
+    --line-faint: rgba(233, 238, 248, 0.045);
 
-    --accent: #a78bfa;
-    --secondary: #8b5cf6;
-    --secondary-hover: #a78bfa;
+    --accent: #a9bdf0;
+    --accent-line: rgba(169, 189, 240, 0.3);
+    --accent-wash: rgba(169, 189, 240, 0.1);
+    --accent-glow: rgba(169, 189, 240, 0.5);
+    --warm: #e6c39b;
+    --warm-wash: rgba(230, 195, 155, 0.14);
+    --cool: #8fb6c9;
+    --cool-wash: rgba(143, 182, 201, 0.14);
 
-    --info: #06b6d4;
-    --info-hover: #22d3ee;
+    --user-bg: #e9e3d6;
+    --user-ink: #12151b;
+    --ai-ink: #ddd8cd;
 
-    --border-glass: rgba(139, 92, 246, 0.15);
-    --border-glow: rgba(167, 139, 250, 0.3);
-    --border-accent: rgba(167, 139, 250, 0.5);
+    --aura-1: rgba(116, 146, 226, 0.16);
+    --aura-2: rgba(230, 195, 155, 0.07);
+    --aura-3: rgba(84, 112, 196, 0.1);
+    --star: rgba(236, 232, 223, 0.6);
+    --star-soft: rgba(236, 232, 223, 0.32);
+    --mesh-opacity: 0.45;
+    --stars-opacity: 0.6;
+    --grain-opacity: 0.035;
+    --portrait-glow: rgba(140, 166, 224, 0.2);
 
-    --user-bubble: #2d2f45;
-    --user-text: #e8e9f0;
+    --scroll-thumb: rgba(233, 238, 248, 0.12);
+    --selection: rgba(169, 189, 240, 0.26);
 
-    --ai-bubble: rgba(26, 27, 46, 0.6);
-    --ai-text: #b4b7c9;
-    --ai-bubble-border: rgba(139, 92, 246, 0.2);
+    --shadow-panel: 0 22px 60px -30px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --shadow-soft: 0 14px 34px -18px rgba(0, 0, 0, 0.9);
 
-    --system-bubble: rgba(30, 32, 48, 0.8);
-    --system-text: #8b5cf6;
-    --system-bubble-border: rgba(139, 92, 246, 0.3);
+    --overlay-bg: rgba(4, 6, 10, 0.72);
 }
 
-/* 幻境玻璃：毛玻璃效果 */
-body[data-theme="glass"] .glass-panel {
-    background: rgba(30, 32, 48, 0.5);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid var(--border-glass);
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        inset 0 0 20px rgba(139, 92, 246, 0.05);
-}
-
-/* 幻境玻璃：动态星空背景 */
-body[data-theme="glass"]::before {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background:
-        radial-gradient(circle at 20% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
-        radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.1) 0%, transparent 50%);
-    pointer-events: none;
-    z-index: 0;
-}
-
-body[data-theme="glass"] .message-bubble.ai {
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-/* ========================================
-   ☁️ 软萌黏土主题 (Clay) - 新拟态设计
-   ======================================== */
+/* ------------------------------------------------------------
+   朝霧 · Asagiri
+   ------------------------------------------------------------ */
 body[data-theme="clay"] {
-    --bg-root: #e0e5ec;
-    --bg-primary: #e0e5ec;
-    --bg-secondary: #e0e5ec;
-    --bg-surface: #e0e5ec;
-    --bg-hover: #d1d9e6;
+    --bg-app: #dfe4d9;
+    --glass-highlight: rgba(255, 255, 255, 0.55);
+    --bg-chamber: #e5e9dd;
+    --bg-chat: #f1f4ed;
+    --bg-toolbar: rgba(240, 244, 236, 0.8);
+    --bg-elev: #fbfcf7;
+    --fill-0: rgba(30, 42, 37, 0.02);
+    --fill-1: rgba(30, 42, 37, 0.05);
+    --fill-2: rgba(30, 42, 37, 0.08);
 
-    --text-primary: #2d3748;
-    --text-secondary: #4a5568;
-    --text-muted: #718096;
-    --text-ghost: #a0aec0;
+    --ink-1: #1c2823;
+    --ink-2: #3b4a43;
+    --ink-3: #55615a;
+    --ink-4: #66706a;
 
-    --primary: #9d8ec9;
-    --primary-hover: #b5a3d9;
-    --primary-glow: rgba(157, 142, 201, 0.4);
+    --line: rgba(28, 40, 35, 0.11);
+    --line-strong: rgba(28, 40, 35, 0.2);
+    --line-faint: rgba(28, 40, 35, 0.05);
 
-    --accent: #d4a5d4;
-    --secondary: #a0c4e0;
-    --secondary-hover: #b8d4ed;
+    --accent: #3f7358;
+    --accent-line: rgba(63, 115, 88, 0.32);
+    --accent-wash: rgba(63, 115, 88, 0.09);
+    --accent-glow: rgba(63, 115, 88, 0.28);
+    --warm: #a86a4c;
+    --warm-wash: rgba(168, 106, 76, 0.12);
+    --cool: #4d7a8c;
+    --cool-wash: rgba(77, 122, 140, 0.12);
 
-    --info: #6bb5d4;
-    --info-hover: #8fc7e0;
+    --user-bg: #22302a;
+    --user-ink: #f1f5ee;
+    --ai-ink: #26332c;
 
-    --border-glass: #d1d9e6;
-    --border-glow: #b5a3d9;
-    --border-accent: #b5a3d9;
+    --aura-1: rgba(140, 172, 146, 0.22);
+    --aura-2: rgba(206, 176, 140, 0.18);
+    --aura-3: rgba(178, 200, 178, 0.16);
+    --star: rgba(60, 84, 70, 0.35);
+    --star-soft: rgba(60, 84, 70, 0.18);
+    --mesh-opacity: 0.35;
+    --stars-opacity: 0.22;
+    --grain-opacity: 0.028;
+    --portrait-glow: rgba(120, 158, 128, 0.24);
 
-    --user-bubble: #d1d9e6;
-    --user-text: #2d3748;
+    --scroll-thumb: rgba(28, 40, 35, 0.18);
+    --selection: rgba(63, 115, 88, 0.18);
 
-    --ai-bubble: #f0f4f8;
-    --ai-text: #2d3748;
-    --ai-bubble-border: #d1d9e6;
+    --shadow-panel: 0 24px 48px -30px rgba(35, 55, 44, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    --shadow-soft: 0 14px 30px -20px rgba(35, 55, 44, 0.45);
 
-    --system-bubble: #e0e5ec;
-    --system-text: #9d8ec9;
-    --system-bubble-border: #d1d9e6;
+    --overlay-bg: rgba(30, 40, 34, 0.4);
 }
 
-/* 软萌黏土：凸起效果（新拟态） */
-body[data-theme="clay"] .glass-panel {
-    background: #e0e5ec;
-    border: none;
-    box-shadow:
-        9px 9px 16px rgba(163, 177, 198, 0.6),
-        -9px -9px 16px rgba(255, 255, 255, 0.5);
-    backdrop-filter: none;
-}
-
-body[data-theme="clay"] .btn,
-body[data-theme="clay"] .btn-icon {
-    box-shadow:
-        6px 6px 12px rgba(163, 177, 198, 0.6),
-        -6px -6px 12px rgba(255, 255, 255, 0.5);
-    border: none;
-}
-
-body[data-theme="clay"] .btn:active,
-body[data-theme="clay"] .btn-icon:active {
-    /* 按下时凹陷效果 */
-    box-shadow:
-        inset 5px 5px 10px rgba(163, 177, 198, 0.6),
-        inset -5px -5px 10px rgba(255, 255, 255, 0.5);
-}
-
-body[data-theme="clay"] .message-bubble {
-    box-shadow:
-        6px 6px 12px rgba(163, 177, 198, 0.4),
-        -6px -6px 12px rgba(255, 255, 255, 0.3);
-    border: none;
-    border-radius: 30px;
-}
-
-body[data-theme="clay"] .input-container {
-    box-shadow:
-        inset 5px 5px 10px rgba(163, 177, 198, 0.4),
-        inset -5px -5px 10px rgba(255, 255, 255, 0.5);
-}
-
-/* ========================================
-   🍃 清新日系主题 (Fresh) - 极简风格
-   ======================================== */
+/* ------------------------------------------------------------
+   纸白 · Paper
+   ------------------------------------------------------------ */
 body[data-theme="fresh"] {
-    --bg-root: #fdfbf7;
-    --bg-primary: #ffffff;
-    --bg-secondary: #f8f9fa;
-    --bg-surface: #ffffff;
-    --bg-hover: #f0f4f8;
+    --bg-app: #efeade;
+    --glass-highlight: rgba(255, 255, 255, 0.7);
+    --bg-chamber: #f4f0e4;
+    --bg-chat: #faf8f2;
+    --bg-toolbar: rgba(250, 248, 242, 0.82);
+    --bg-elev: #fffdf8;
+    --fill-0: rgba(22, 24, 29, 0.018);
+    --fill-1: rgba(22, 24, 29, 0.045);
+    --fill-2: rgba(22, 24, 29, 0.075);
 
-    --text-primary: #2c3e50;
-    --text-secondary: #5a6c7d;
-    --text-muted: #95a5a6;
-    --text-ghost: #bdc3c7;
+    --ink-1: #15171c;
+    --ink-2: #3f434b;
+    --ink-3: #565a62;
+    --ink-4: #6c717a;
 
-    --primary: #88c999;
-    --primary-hover: #a1d9b0;
-    --primary-glow: rgba(136, 201, 153, 0.3);
+    --line: rgba(22, 24, 29, 0.12);
+    --line-strong: rgba(22, 24, 29, 0.22);
+    --line-faint: rgba(22, 24, 29, 0.05);
 
-    --accent: #7fb3d5;
-    --secondary: #f7dc6f;
-    --secondary-hover: #f9e79f;
+    --accent: #2e4b76;
+    --accent-line: rgba(46, 75, 118, 0.3);
+    --accent-wash: rgba(46, 75, 118, 0.08);
+    --accent-glow: rgba(46, 75, 118, 0.24);
+    --warm: #a3653a;
+    --warm-wash: rgba(163, 101, 58, 0.1);
+    --cool: #48707e;
+    --cool-wash: rgba(72, 112, 126, 0.1);
 
-    --info: #1890ff;
-    --info-hover: #40a9ff;
+    --user-bg: #15171c;
+    --user-ink: #f6f3eb;
+    --ai-ink: #202329;
 
-    --border-glass: #e8f0e8;
-    --border-glow: #c9e4d4;
-    --border-accent: #9ec9dd;
+    --aura-1: rgba(214, 198, 168, 0.28);
+    --aura-2: rgba(180, 196, 214, 0.16);
+    --aura-3: rgba(228, 214, 190, 0.2);
+    --star: rgba(46, 75, 118, 0.24);
+    --star-soft: rgba(46, 75, 118, 0.12);
+    --mesh-opacity: 0.3;
+    --stars-opacity: 0.12;
+    --grain-opacity: 0.03;
+    --portrait-glow: rgba(198, 178, 142, 0.3);
 
-    --user-bubble: #e8f5e9;
-    --user-text: #2c3e50;
+    --scroll-thumb: rgba(22, 24, 29, 0.16);
+    --selection: rgba(46, 75, 118, 0.16);
 
-    --ai-bubble: #ffffff;
-    --ai-text: #2c3e50;
-    --ai-bubble-border: #e0e0e0;
+    --shadow-panel: 0 22px 44px -32px rgba(70, 58, 40, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    --shadow-soft: 0 12px 26px -18px rgba(70, 58, 40, 0.32);
 
-    --system-bubble: #f0f4f8;
-    --system-text: #7fb3d5;
-    --system-bubble-border: #e0e0e0;
+    --overlay-bg: rgba(38, 34, 26, 0.34);
 }
 
-/* 清新日系：纸质卡片效果 */
-body[data-theme="fresh"] .glass-panel {
-    background: #ffffff;
-    border: 1px solid #e0e0e0;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-    backdrop-filter: none;
-}
-
-body[data-theme="fresh"] .message-bubble {
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-    border: 1px solid rgba(0, 0, 0, 0.05);
-    border-radius: 12px;
-}
-
-body[data-theme="fresh"] .btn,
-body[data-theme="fresh"] .btn-icon {
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
-    border: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-body[data-theme="fresh"] .btn:hover,
-body[data-theme="fresh"] .btn-icon:hover {
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
-}
-
-/* 清新日系：细微网格纹理背景 */
-body[data-theme="fresh"]::before {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-image:
-        linear-gradient(rgba(0, 0, 0, 0.02) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 0, 0, 0.02) 1px, transparent 1px);
-    background-size: 20px 20px;
-    pointer-events: none;
-    z-index: 0;
-}
-
-/* ========================================
-   🌙 深邃暗夜主题 (Dark) - 赛博朋克
-   ======================================== */
+/* ------------------------------------------------------------
+   曜石 · Obsidian
+   ------------------------------------------------------------ */
 body[data-theme="dark"] {
-    --bg-root: #000000;
-    --bg-primary: #0d0d0d;
-    --bg-secondary: #161616;
-    --bg-surface: #1a1a1a;
-    --bg-hover: #242424;
+    --bg-app: #050506;
+    --glass-highlight: rgba(255, 255, 255, 0.04);
+    --bg-chamber: #0a0a0b;
+    --bg-chat: #070708;
+    --bg-toolbar: rgba(8, 8, 9, 0.74);
+    --bg-elev: #121213;
+    --fill-0: rgba(255, 255, 255, 0.025);
+    --fill-1: rgba(255, 255, 255, 0.055);
+    --fill-2: rgba(255, 255, 255, 0.09);
 
-    --text-primary: #ffffff;
-    --text-secondary: #d4d4d4;
-    --text-muted: #8c8c8c;
-    --text-ghost: #525252;
+    --ink-1: #f3f2ef;
+    --ink-2: #b5b4b0;
+    --ink-3: #8d8d92;
+    --ink-4: #7a7a80;
 
-    --primary: #3b82f6;
-    --primary-hover: #60a5fa;
-    --primary-glow: rgba(59, 130, 246, 0.5);
+    --line: rgba(255, 255, 255, 0.09);
+    --line-strong: rgba(255, 255, 255, 0.18);
+    --line-faint: rgba(255, 255, 255, 0.04);
 
-    --accent: #8b5cf6;
-    --secondary: #06b6d4;
-    --secondary-hover: #22d3ee;
+    --accent: #d7b689;
+    --accent-line: rgba(215, 182, 137, 0.28);
+    --accent-wash: rgba(215, 182, 137, 0.09);
+    --accent-glow: rgba(215, 182, 137, 0.42);
+    --warm: #d7b689;
+    --warm-wash: rgba(215, 182, 137, 0.14);
+    --cool: #9a9a9c;
+    --cool-wash: rgba(154, 154, 156, 0.12);
 
-    --info: #06b6d4;
-    --info-hover: #22d3ee;
+    --user-bg: #f0ede7;
+    --user-ink: #0a0a0b;
+    --ai-ink: #e2e0da;
 
-    --border-glass: rgba(59, 130, 246, 0.3);
-    --border-glow: rgba(139, 92, 246, 0.5);
-    --border-accent: rgba(6, 182, 212, 0.7);
+    --aura-1: rgba(255, 255, 255, 0.05);
+    --aura-2: rgba(215, 182, 137, 0.07);
+    --aura-3: rgba(255, 255, 255, 0.03);
+    --star: rgba(255, 255, 255, 0.5);
+    --star-soft: rgba(255, 255, 255, 0.22);
+    --mesh-opacity: 0.22;
+    --stars-opacity: 0.45;
+    --grain-opacity: 0.05;
+    --portrait-glow: rgba(255, 255, 255, 0.1);
 
-    --user-bubble: #1a1a1a;
-    --user-text: #ffffff;
+    --scroll-thumb: rgba(255, 255, 255, 0.12);
+    --selection: rgba(215, 182, 137, 0.22);
 
-    --ai-bubble: rgba(13, 13, 13, 0.8);
-    --ai-text: #d4d4d4;
-    --ai-bubble-border: rgba(59, 130, 246, 0.3);
+    --shadow-panel: 0 26px 64px -34px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    --shadow-soft: 0 16px 36px -20px rgba(0, 0, 0, 0.95);
 
-    --system-bubble: rgba(22, 22, 22, 0.9);
-    --system-text: #8b5cf6;
-    --system-bubble-border: rgba(139, 92, 246, 0.3);
+    --overlay-bg: rgba(0, 0, 0, 0.78);
 }
 
-/* 深邃暗夜：霓虹发光效果 */
+/* ------------------------------------------------------------
+   旧变量兼容（历史内联样式仍会引用）
+   ------------------------------------------------------------ */
+body {
+    --text-primary: var(--ink-1);
+    --text-secondary: var(--ink-2);
+    --text-muted: var(--ink-3);
+    --text-ghost: var(--ink-4);
+    --bg-root: var(--bg-app);
+    --bg-primary: var(--bg-chat);
+    --bg-secondary: var(--bg-chamber);
+    --bg-surface: var(--bg-elev);
+    --bg-hover: var(--fill-1);
+    --border-glass: var(--line);
+    --border-glow: var(--accent-line);
+    --border-accent: var(--accent-line);
+    --primary: var(--accent);
+    --primary-hover: var(--accent);
+    --primary-glow: var(--accent-glow);
+    --secondary: var(--accent);
+    --secondary-hover: var(--accent);
+    --info: var(--accent);
+    --info-hover: var(--accent);
+    --affection-high: var(--accent);
+    --affection-mid: var(--warm);
+    --affection-low: #c2624f;
+    --system-bubble: var(--fill-0);
+    --system-text: var(--ink-3);
+    --system-bubble-border: var(--line);
+    --ai-bubble: transparent;
+    --ai-text: var(--ai-ink);
+    --ai-bubble-border: transparent;
+    --user-bubble: var(--user-bg);
+    --user-text: var(--user-ink);
+}
+
+/* 主题切换：圆形揭示 */
+body.theme-transition::before {
+    content: "";
+    position: fixed;
+    top: var(--reveal-y, 50%);
+    left: var(--reveal-x, 50%);
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: var(--bg-app);
+    transform: translate(-50%, -50%);
+    animation: reveal-circle var(--dur-3) var(--ease) forwards;
+    pointer-events: none;
+    z-index: 9000;
+}
+
+body.theme-transition::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9001;
+    border: 1px solid var(--accent-line);
+    opacity: 0;
+    animation: reveal-edge var(--dur-3) var(--ease) forwards;
+}
+
+/* 让原生控件（下拉、滚动条、自动填充）跟随主题 */
+body[data-theme="glass"],
+body[data-theme="dark"] {
+    color-scheme: dark;
+}
+
+body[data-theme="clay"],
+body[data-theme="fresh"] {
+    color-scheme: light;
+}
+
+/* 强调色上的文字色：深色主题用墨色，浅色主题用纸色 */
+body[data-theme="glass"],
+body[data-theme="dark"] {
+    --accent-contrast: #0a0c10;
+}
+
+body[data-theme="clay"],
+body[data-theme="fresh"] {
+    --accent-contrast: #faf8f2;
+}
+
+/* 主题材质微差 */
+body[data-theme="glass"] .glass-panel {
+    box-shadow: var(--shadow-panel);
+}
+
+body[data-theme="fresh"] .glass-panel,
+body[data-theme="clay"] .glass-panel {
+    box-shadow: var(--shadow-panel);
+}
+
 body[data-theme="dark"] .glass-panel {
-    background: rgba(26, 26, 26, 0.6);
-    backdrop-filter: blur(10px);
-    border: 1px solid var(--border-glass);
-    box-shadow:
-        0 0 20px rgba(59, 130, 246, 0.2),
-        inset 0 0 20px rgba(59, 130, 246, 0.05);
+    box-shadow: var(--shadow-panel);
 }
 
-body[data-theme="dark"] .message-bubble.user {
-    border: 1px solid var(--border-glass);
-    box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
-}
-
-body[data-theme="dark"] .message-bubble.ai {
-    backdrop-filter: blur(8px);
-    box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
-}
-
-body[data-theme="dark"] .btn-primary {
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
-}
-
-body[data-theme="dark"] .btn-primary:hover {
-    box-shadow:
-        0 0 30px rgba(59, 130, 246, 0.6),
-        0 8px 16px rgba(59, 130, 246, 0.3);
-}
-
-/* 深邃暗夜：网格线动画背景 */
-body[data-theme="dark"]::before {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-image:
-        linear-gradient(rgba(59, 130, 246, 0.05) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(59, 130, 246, 0.05) 1px, transparent 1px);
-    background-size: 50px 50px;
-    animation: gridMove 20s linear infinite;
-    pointer-events: none;
-    z-index: 0;
-}
-
-@keyframes gridMove {
-    0% {
-        transform: translateY(0);
-    }
-
-    100% {
-        transform: translateY(50px);
-    }
-}
-
-/* 深邃暗夜：CRT扫描线效果 */
-body[data-theme="dark"]::after {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(to bottom,
-            rgba(255, 255, 255, 0) 50%,
-            rgba(0, 0, 0, 0.02) 50%);
-    background-size: 100% 4px;
-    pointer-events: none;
-    z-index: 1000;
-    opacity: 0.3;
-}
-
-/* ========================================
-   通用主题过渡效果
-   ======================================== */
-body,
-.glass-panel,
-.message-bubble,
-.btn,
-.btn-icon {
-    transition:
-        background-color 0.5s ease,
-        color 0.5s ease,
-        border-color 0.5s ease,
-        box-shadow 0.5s ease;
+/* 纸白与朝霧：发丝线更实，适合浅色纸面 */
+body[data-theme="fresh"] .toolbar,
+body[data-theme="clay"] .toolbar {
+    border-bottom-color: var(--line);
 }

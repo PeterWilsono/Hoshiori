@@ -30,13 +30,11 @@ class ConfigManager:
             "default_model": "mimo-v2.6-pro",
             "models": [
                 {"value": "mimo-v2.6-pro", "label": "mimo-v2.6-pro (旗舰推理，推荐)", "supports_thinking": True},
-                {"value": "mimo-v2.6-flash", "label": "mimo-v2.6-flash (高效推理)", "supports_thinking": True},
-                {"value": "mimo-v2.5-pro", "label": "mimo-v2.5-pro (旧版专业)", "supports_thinking": True},
-                {"value": "mimo-v2.5", "label": "mimo-v2.5 (旧版标准)", "supports_thinking": True},
-                {"value": "mimo-v2-flash", "label": "mimo-v2-flash (旧版快速)", "supports_thinking": False}
+                {"value": "mimo-v2.6-pro-ultraspeed", "label": "mimo-v2.6-pro-ultraspeed (超高速)", "supports_thinking": True},
+                {"value": "mimo-v2.6-flash", "label": "mimo-v2.6-flash (高效推理)", "supports_thinking": True}
             ],
             "key_placeholder": "sk-...",
-            "description": "小米MiMo API - V2.6 系列为推理模型，默认自动深度思考",
+            "description": "小米MiMo API - V2.6 系列（V2.5 及更早版本已于 2026.10 下线）",
             "thinking_modes": [],
             "supports_web_search": True
         }

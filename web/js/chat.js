@@ -6,14 +6,52 @@ let uploadedFileContent = null;
 let uploadedFileName = null;
 
 /**
+ * 轻量富文本渲染：先转义，再处理代码块 / 行内代码 / 加粗 / 链接
+ * @param {string} raw
+ * @returns {string} 安全的 HTML
+ */
+function renderRichText(raw) {
+    const codeBlocks = [];
+
+    let text = escapeHtml(raw).replace(/```([\w+#-]*)\r?\n([\s\S]*?)```/g, (m, lang, code) => {
+        const idx = codeBlocks.push(`<pre><code>${code.replace(/\n$/, '')}</code></pre>`) - 1;
+        return `\u0000${idx}\u0000`;
+    });
+
+    text = text
+        .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[\s(（])(https?:\/\/[^\s<）)]+)/g,
+            '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+
+    const parts = text.split(/\u0000(\d+)\u0000/);
+    let out = '';
+
+    parts.forEach((part, i) => {
+        if (i % 2 === 1) {
+            out += codeBlocks[Number(part)] || '';
+            return;
+        }
+        let text = part.replace(/\n{3,}/g, '\n\n');
+        // 与代码块相邻的空行交给代码块自身的间距处理
+        if (i > 0) text = text.replace(/^\n+/, '');
+        if (i < parts.length - 1) text = text.replace(/\n+$/, '');
+        out += text.replace(/\n/g, '<br>');
+    });
+
+    return out;
+}
+
+/**
  * 初始化聊天功能
  */
 function initChat() {
     const messageInput = document.getElementById('messageInput');
+    if (!messageInput) return;
 
     // 回车发送消息
     messageInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
             e.preventDefault();
             sendMessage();
         }
@@ -21,6 +59,72 @@ function initChat() {
 
     // 加载历史消息
     loadCurrentConversation();
+    updateWelcome();
+    loadResumeHint();
+}
+
+/**
+ * 空状态：显示「上次停在这里」的入口
+ */
+async function loadResumeHint() {
+    const hint = document.getElementById('resumeHint');
+    const titleEl = document.getElementById('resumeTitle');
+    if (!hint || !titleEl) return;
+
+    try {
+        const list = await eel.get_conversations_list()();
+        const last = (list || []).find(c => !c.is_current && (c.message_count || 0) > 0);
+        if (!last) {
+            hint.hidden = true;
+            return;
+        }
+        titleEl.textContent = last.title || '未命名对话';
+        hint.hidden = false;
+        hint.onclick = () => loadConversation(last.id);
+    } catch (e) {
+        hint.hidden = true;
+    }
+}
+
+/**
+ * 同步空状态 / 会话抬头
+ */
+function updateWelcome() {
+    const chatMessages = document.getElementById('chatMessages');
+    const welcome = document.getElementById('welcomeState');
+    if (!chatMessages || !welcome) return;
+
+    const hasAny = chatMessages.children.length > 0;
+    welcome.classList.toggle('is-hidden', hasAny);
+    chatMessages.classList.toggle('is-empty', !hasAny);
+
+    const head = document.getElementById('sessionHead');
+    const label = document.getElementById('sessionHeadLabel');
+    if (head) {
+        head.hidden = !hasAny;
+        if (label) label.textContent = sessionLabel();
+    }
+}
+
+/**
+ * 生成会话抬头的时间标签
+ */
+function sessionLabel() {
+    const now = new Date();
+    const h = now.getHours();
+    const part = h < 5 ? '凌晨' : h < 11 ? '上午' : h < 14 ? '午后' : h < 18 ? '黄昏' : h < 23 ? '夜' : '深夜';
+    const month = now.getMonth() + 1;
+    const day = now.getDate();
+    return `${month}月${day}日 · ${part}`;
+}
+
+/**
+ * 是否已贴在底部
+ */
+function isNearBottom(threshold = 140) {
+    const container = document.getElementById('chatContainer');
+    if (!container) return true;
+    return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
 }
 
 /**
@@ -31,12 +135,13 @@ async function sendMessage() {
     let message = input.value.trim();
 
     if (!message && !uploadedFileContent) {
-        showNotification('请输入消息', 'error', 2000);
+        showNotification('还没写内容呢', 'info', 1800);
+        input.focus();
         return;
     }
 
     if (isWaitingForResponse) {
-        showNotification('请等待AI回复', 'error', 2000);
+        showNotification('星织正在回复，稍等一下', 'info', 1800);
         return;
     }
 
@@ -51,42 +156,78 @@ async function sendMessage() {
     // 清空输入
     input.value = '';
     clearFile();
+    if (typeof window.resetComposer === 'function') window.resetComposer();
 
     // 滚动到底部
-    scrollToBottom();
+    scrollToBottom(true);
 
     // 设置等待状态
     isWaitingForResponse = true;
 
     // 显示typing指示器
     showTypingIndicator();
-    
+
     // 添加思考动画
-    if (window.avatarAnimationManager) {
-        const avatarImage = document.getElementById('avatarImage');
-        if (avatarImage) {
-            avatarImage.classList.add('thinking');
-        }
-    }
+    const avatarImage = document.getElementById('avatarImage');
+    if (avatarImage) avatarImage.classList.add('thinking');
 
     try {
-        // 调用Python发送消息
         await eel.send_message_from_web(message)();
     } catch (e) {
         console.error('Send message error:', e);
         removeTypingIndicator();
-        
-        // 移除思考动画
-        if (window.avatarAnimationManager) {
-            const avatarImage = document.getElementById('avatarImage');
-            if (avatarImage) {
-                avatarImage.classList.remove('thinking');
-            }
-        }
-        
+        if (avatarImage) avatarImage.classList.remove('thinking');
         showNotification('发送失败，请重试', 'error');
         isWaitingForResponse = false;
     }
+}
+
+/**
+ * 构建单条消息节点
+ * @param {string} role - user / ai / system
+ * @param {string} content
+ * @param {number} index
+ * @returns {HTMLElement}
+ */
+function buildMessageNode(role, content, index = 0) {
+    const node = document.createElement('div');
+    node.className = `message-bubble ${role}`;
+    node.style.setProperty('--i', Math.min(index, 5));
+
+    if (role === 'ai') {
+        node.innerHTML = `
+            <div class="msg-rule">
+                <span class="msg-rule__star"><svg viewBox="0 0 24 24"><use href="#i-star"></use></svg></span>
+                <span class="msg-rule__line"></span>
+                <time class="msg-rule__time">${nowClock()}</time>
+                <button class="msg-copy" type="button" aria-label="复制这段话" title="复制">
+                    <svg class="icon" viewBox="0 0 24 24"><use href="#i-copy"></use></svg>
+                </button>
+            </div>
+            <div class="msg-body">${renderRichText(content)}</div>
+        `;
+
+        const copyBtn = node.querySelector('.msg-copy');
+        copyBtn.addEventListener('click', async () => {
+            const ok = await copyToClipboard(content, true);
+            if (!ok) return;
+            copyBtn.classList.add('is-done');
+            copyBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><use href="#i-check"></use></svg>';
+            setTimeout(() => {
+                copyBtn.classList.remove('is-done');
+                copyBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><use href="#i-copy"></use></svg>';
+            }, 1400);
+        });
+    } else if (role === 'user') {
+        node.innerHTML = `
+            <div class="msg-body">${renderRichText(content)}</div>
+            <div class="msg-meta">${nowClock()}</div>
+        `;
+    } else {
+        node.textContent = content;
+    }
+
+    return node;
 }
 
 /**
@@ -96,15 +237,18 @@ async function sendMessage() {
  */
 function displayMessage(role, content) {
     const chatMessages = document.getElementById('chatMessages');
+    if (!chatMessages) return;
 
-    const bubble = document.createElement('div');
-    bubble.className = `message-bubble ${role}`;
-    bubble.textContent = content;
+    const stick = isNearBottom();
+    const index = chatMessages.children.length;
+    const node = buildMessageNode(role, content, index);
 
-    chatMessages.appendChild(bubble);
+    chatMessages.appendChild(node);
+    updateWelcome();
 
-    // 滚动到底部
-    setTimeout(() => scrollToBottom(), 100);
+    if (stick || role === 'user') {
+        setTimeout(() => scrollToBottom(true), 60);
+    }
 }
 
 /**
@@ -114,25 +258,21 @@ function displayMessage(role, content) {
 eel.expose(receiveAIResponse);
 function receiveAIResponse(content) {
     removeTypingIndicator();
-    
-    // 移除思考动画
+
     const avatarImage = document.getElementById('avatarImage');
-    if (avatarImage) {
-        avatarImage.classList.remove('thinking');
-    }
-    
-    // 添加说话动画
+    if (avatarImage) avatarImage.classList.remove('thinking');
+
+    // 说话动画
     if (window.avatarAnimationManager && avatarImage) {
         avatarImage.classList.add('talking');
-        
-        // 根据内容长度决定说话动画持续时间
-        const duration = Math.min(content.length * 50, 5000); // 最多5秒
-        setTimeout(() => {
-            avatarImage.classList.remove('talking');
-        }, duration);
+        const duration = Math.min(String(content).length * 50, 5000);
+        setTimeout(() => avatarImage.classList.remove('talking'), duration);
     }
-    
+
+    const stick = isNearBottom();
     displayMessage('ai', content);
+    if (stick) scrollToBottom(true);
+
     isWaitingForResponse = false;
 }
 
@@ -141,20 +281,27 @@ function receiveAIResponse(content) {
  */
 function showTypingIndicator() {
     const chatMessages = document.getElementById('chatMessages');
+    if (!chatMessages || document.getElementById('typingIndicator')) return;
 
     const indicator = document.createElement('div');
     indicator.id = 'typingIndicator';
     indicator.className = 'message-bubble ai';
     indicator.innerHTML = `
-        <div class="loading-dots">
-            <span></span>
-            <span></span>
-            <span></span>
+        <div class="msg-rule">
+            <span class="msg-rule__star"><svg viewBox="0 0 24 24"><use href="#i-star"></use></svg></span>
+            <span class="msg-rule__line"></span>
+            <time class="msg-rule__time">此刻</time>
+        </div>
+        <div class="msg-body">
+            <div class="loading-dots"><span></span><span></span><span></span>
+                <em class="typing-label">星织正在书写</em>
+            </div>
         </div>
     `;
 
     chatMessages.appendChild(indicator);
-    scrollToBottom();
+    updateWelcome();
+    scrollToBottom(true);
 }
 
 /**
@@ -162,17 +309,22 @@ function showTypingIndicator() {
  */
 function removeTypingIndicator() {
     const indicator = document.getElementById('typingIndicator');
-    if (indicator) {
-        indicator.remove();
-    }
+    if (indicator) indicator.remove();
+    updateWelcome();
 }
 
 /**
  * 滚动到底部
+ * @param {boolean} smooth
  */
-function scrollToBottom() {
+function scrollToBottom(smooth = false) {
     const container = document.getElementById('chatContainer');
-    container.scrollTop = container.scrollHeight;
+    if (!container) return;
+    if (smooth) {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    } else {
+        container.scrollTop = container.scrollHeight;
+    }
 }
 
 /**
@@ -180,7 +332,16 @@ function scrollToBottom() {
  */
 function scrollToTop() {
     const container = document.getElementById('chatContainer');
-    container.scrollTop = 0;
+    if (container) container.scrollTop = 0;
+}
+
+/**
+ * 回到最新（供浮标调用）
+ */
+function scrollToLatest() {
+    scrollToBottom(true);
+    const pill = document.getElementById('scrollPill');
+    if (pill) pill.classList.remove('is-visible');
 }
 
 /**
@@ -188,7 +349,8 @@ function scrollToTop() {
  */
 function clearChat() {
     const chatMessages = document.getElementById('chatMessages');
-    chatMessages.innerHTML = '';
+    if (chatMessages) chatMessages.innerHTML = '';
+    updateWelcome();
 }
 
 /**
@@ -197,19 +359,31 @@ function clearChat() {
 async function loadCurrentConversation() {
     try {
         const conversation = await eel.get_current_conversation()();
+
+        const sessionEl = document.getElementById('titlebarSession');
+        if (sessionEl) {
+            const label = (conversation && conversation.title) || '';
+            sessionEl.textContent = label;
+            sessionEl.title = label;
+        }
+
         if (conversation && conversation.messages) {
             clearChat();
-            conversation.messages.forEach(msg => {
-                // 映射角色：assistant -> ai, user -> user
+            conversation.messages.forEach((msg, i) => {
                 const role = msg.role === 'user' ? 'user' : (msg.role === 'assistant' ? 'ai' : 'system');
-                // 只显示非空内容
                 if (msg.content && msg.content.trim()) {
-                    displayMessage(role, msg.content);
+                    const chatMessages = document.getElementById('chatMessages');
+                    chatMessages.appendChild(buildMessageNode(role, msg.content, i));
                 }
             });
+            updateWelcome();
+            scrollToBottom(false);
+        } else {
+            updateWelcome();
         }
     } catch (e) {
         console.error('Load conversation error:', e);
+        updateWelcome();
     }
 }
 
@@ -220,11 +394,69 @@ async function newConversation() {
     try {
         await eel.new_conversation_from_web()();
         clearChat();
-        showNotification('已创建新对话', 'success', 2000);
+        updateWelcome();
+        const sessionEl = document.getElementById('titlebarSession');
+        if (sessionEl) {
+            sessionEl.textContent = '';
+            sessionEl.title = '';
+        }
+        closeModal(document.querySelector('.modal-overlay[data-modal="history"]'));
+        await loadResumeHint();
+        showNotification('新的夜晚，新的对话', 'success', 2000);
+        const input = document.getElementById('messageInput');
+        if (input) input.focus();
     } catch (e) {
         console.error('New conversation error:', e);
         showNotification('创建失败', 'error');
     }
+}
+
+/**
+ * 历史列表条目
+ * @param {Array} conversations
+ */
+function conversationItemsHtml(conversations) {
+    return conversations.map(conv => `
+        <div class="conversation-item ${conv.is_current ? 'active' : ''}"
+             data-id="${conv.id}"
+             onclick="loadConversation('${conv.id}')">
+            <div class="conversation-info">
+                <div class="conversation-title">${escapeHtml(conv.title || '未命名对话')}</div>
+                <div class="conversation-meta">
+                    <span>${formatTime(conv.timestamp)}</span>
+                    <span class="conversation-meta__dot">·</span>
+                    <span>${conv.message_count} 则</span>
+                    ${conv.is_current ? '<span class="conversation-meta__now">停留中</span>' : ''}
+                </div>
+            </div>
+            <div class="conversation-actions">
+                <button class="conversation-action-btn" type="button" aria-label="删除这段对话"
+                        onclick="event.stopPropagation(); deleteConversation('${conv.id}', this)">
+                    <svg class="icon icon-sm" viewBox="0 0 24 24"><use href="#i-trash"></use></svg>
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+/**
+ * 就地刷新已打开的历史面板
+ * @param {Array} conversations
+ */
+function refreshHistoryModal(conversations) {
+    const overlay = document.querySelector('.modal-overlay[data-modal="history"]');
+    if (!overlay) return;
+
+    if (!conversations || conversations.length === 0) {
+        closeModal(overlay);
+        return;
+    }
+
+    const list = overlay.querySelector('.conversation-list');
+    if (list) list.innerHTML = conversationItemsHtml(conversations);
+
+    const title = overlay.querySelector('.modal-title');
+    if (title) title.textContent = `历史对话 · ${conversations.length}`;
 }
 
 /**
@@ -235,37 +467,18 @@ async function showConversationList() {
         const conversations = await eel.get_conversations_list()();
 
         if (!conversations || conversations.length === 0) {
-            showNotification('暂无历史对话', 'info', 2000);
+            showNotification('还没有留下过对话', 'info', 2000);
             return;
         }
 
-        const listHtml = conversations.map(conv => `
-            <div class="conversation-item ${conv.is_current ? 'active' : ''}" 
-                 onclick="loadConversation('${conv.id}')">
-                <div class="conversation-info">
-                    <div class="conversation-title">${escapeHtml(conv.title || '新对话')}</div>
-                    <div class="conversation-meta">${formatTime(conv.timestamp)} · ${conv.message_count} 条消息</div>
-                </div>
-                <div class="conversation-actions">
-                    <button class="conversation-action-btn" 
-                            onclick="event.stopPropagation(); deleteConversation('${conv.id}')">
-                        🗑
-                    </button>
-                </div>
-            </div>
-        `).join('');
-
-        createModal(
-            '📋 历史对话',
-            `<div class="conversation-list">${listHtml}</div>`,
+        const overlay = createModal(
+            `历史对话 · ${conversations.length}`,
+            `<div class="conversation-list">${conversationItemsHtml(conversations)}</div>`,
             [
-                {
-                    text: '关闭',
-                    style: 'btn-ghost',
-                    onClick: () => { }
-                }
+                { text: '关闭', style: 'btn-ghost', onClick: () => {} }
             ]
         );
+        if (overlay) overlay.setAttribute('data-modal', 'history');
     } catch (e) {
         console.error('Get conversations error:', e);
         showNotification('加载失败', 'error');
@@ -278,10 +491,15 @@ async function showConversationList() {
  */
 async function loadConversation(convId) {
     try {
-        await eel.load_conversation_from_web(convId)();
+        const ok = await eel.load_conversation_from_web(convId)();
+        if (!ok) {
+            showNotification('这段对话已经找不到了', 'error');
+            await refreshConversationState();
+            return;
+        }
         await loadCurrentConversation();
-        closeModal(event.target);
-        showNotification('已加载对话', 'success', 2000);
+        closeModal(document.querySelector('.modal-overlay[data-modal="history"]'));
+        showNotification('已回到那段对话', 'success', 2000);
     } catch (e) {
         console.error('Load conversation error:', e);
         showNotification('加载失败', 'error');
@@ -291,62 +509,95 @@ async function loadConversation(convId) {
 /**
  * 删除对话
  * @param {string} convId - 对话ID
+ * @param {HTMLElement} trigger
  */
-async function deleteConversation(convId) {
-    if (!confirm('确定要删除这个对话吗？')) {
+async function deleteConversation(convId, trigger) {
+    const item = (trigger && trigger.closest)
+        ? trigger.closest('.conversation-item')
+        : document.querySelector(`.conversation-item[data-id="${convId}"]`);
+    const titleEl = item ? item.querySelector('.conversation-title') : null;
+    const title = titleEl ? titleEl.textContent.trim() : '这段对话';
+
+    const confirmed = await confirmDialog({
+        title: '要烧掉这一页吗？',
+        text: `「${escapeHtml(title)}」连同里面的每一句都会消失，事后找不回来。`,
+        confirmText: '删除这一段',
+        cancelText: '留着吧',
+        danger: true
+    });
+    if (!confirmed) return;
+
+    const res = await eel.delete_conversation_from_web(convId)();
+
+    if (!res || !res.success) {
+        showNotification((res && res.message) || '删除失败', 'error', 2600);
         return;
     }
 
-    try {
-        const success = await eel.delete_conversation_from_web(convId)();
-        if (success) {
-            showNotification('已删除对话', 'success', 2000);
-            // 移除对话项元素
-            const item = event.target.closest('.conversation-item');
-            if (item) {
-                item.style.animation = 'fadeOut 0.3s ease';
-                setTimeout(() => item.remove(), 300);
-            }
-        } else {
-            showNotification('删除失败', 'error');
-        }
-    } catch (e) {
-        console.error('Delete conversation error:', e);
-        showNotification('删除失败', 'error');
+    // 先让列表条目收走，再做数据刷新（后端删除后 ID 会重排，旧的 DOM 不能复用）
+    if (item) {
+        item.classList.add('is-removing');
+        await new Promise(r => setTimeout(r, 240));
     }
+
+    let conversations = [];
+    try {
+        conversations = await eel.get_conversations_list()() || [];
+    } catch (e) {
+        console.error('Refresh conversations error:', e);
+    }
+    refreshHistoryModal(conversations);
+
+    // 删掉的正是当前这段：主对话区必须跟着换掉
+    if (res.wasCurrent) {
+        await loadCurrentConversation();
+        showNotification('已删除，停在最近的一段对话', 'success', 2600);
+    } else {
+        showNotification('对话已删除', 'success', 1800);
+    }
+
+    await loadResumeHint();
+}
+
+/**
+ * 对话被外部改动后，重新对齐整个界面
+ */
+async function refreshConversationState() {
+    await loadCurrentConversation();
+    let conversations = [];
+    try {
+        conversations = await eel.get_conversations_list()() || [];
+    } catch (e) { }
+    refreshHistoryModal(conversations);
+    await loadResumeHint();
 }
 
 /**
  * 上传文件
  */
 async function uploadFile() {
-    console.log('📎 点击上传按钮');
     try {
-        console.log('🔄 调用后端上传函数...');
         const result = await eel.upload_file_from_web()();
-        console.log('📦 收到后端响应:', result);
-        
+
         if (result && result.success) {
             uploadedFileContent = result.content;
             uploadedFileName = result.filename;
 
             const fileIndicator = document.getElementById('fileIndicator');
             const fileInfo = document.getElementById('fileInfo');
-            fileInfo.textContent = `📄 ${result.filename} (${result.char_count} 字符)`;
-            fileIndicator.style.display = 'flex';
+            if (fileInfo) fileInfo.textContent = `${result.filename} · ${result.char_count} 字符`;
+            if (fileIndicator) fileIndicator.style.display = 'flex';
 
-            showNotification('文件上传成功', 'success', 2000);
+            showNotification('文件已附上', 'success', 2000);
         } else if (result && result.cancelled) {
-            console.log('⚠️ 用户取消了文件选择');
-            // 用户取消，不显示错误
+            console.log('用户取消了文件选择');
         } else {
             const errorMsg = result && result.error ? result.error : '未知错误';
-            console.error('❌ 上传失败:', errorMsg);
-            showNotification(`文件上传失败: ${errorMsg}`, 'error', 3000);
+            showNotification(`文件读取失败：${errorMsg}`, 'error', 3000);
         }
     } catch (e) {
-        console.error('❌ Upload file error:', e);
-        showNotification(`文件上传异常: ${e.message || e}`, 'error', 3000);
+        console.error('Upload file error:', e);
+        showNotification(`文件上传异常：${e.message || e}`, 'error', 3000);
     }
 }
 
@@ -358,7 +609,7 @@ function clearFile() {
     uploadedFileName = null;
 
     const fileIndicator = document.getElementById('fileIndicator');
-    fileIndicator.style.display = 'none';
+    if (fileIndicator) fileIndicator.style.display = 'none';
 }
 
 // 导出

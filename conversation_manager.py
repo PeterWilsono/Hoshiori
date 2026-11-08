@@ -666,23 +666,42 @@ class ConversationManager:
             self.save_conversations()
     
     def delete_conversation(self, conv_id):
-        """删除对话"""
+        """删除对话
+
+        注意：删除后 ID 会被重排，调用方必须重新读取列表，不能沿用旧的 ID。
+
+        Returns:
+            (success: bool, message: str, current_id)
+            current_id 为重排之后的当前对话 ID，可能为 None。
+        """
+        try:
+            conv_id = int(conv_id)
+        except (TypeError, ValueError):
+            return False, "对话不存在", self.current_conversation_id
+
+        if conv_id not in self.conversations:
+            return False, "对话不存在", self.current_conversation_id
+
         if len(self.conversations) == 1:
-            return False, "不能删除最后一个对话!"
-        
-        if conv_id in self.conversations:
-            del self.conversations[conv_id]
-            
-            if conv_id == self.current_conversation_id:
-                if self.conversations:
-                    self.current_conversation_id = max(self.conversations.keys())
-                else:
-                    self.current_conversation_id = None
-            
-            self.reorder_conversation_ids()
-            self.save_conversations()
-            return True, "删除成功"
-        return False, "对话不存在"
+            return False, "不能删除最后一个对话", self.current_conversation_id
+
+        was_current = conv_id == self.current_conversation_id
+        del self.conversations[conv_id]
+
+        if was_current:
+            if self.conversations:
+                # 切到「最近聊过」的那一段，而不是编号最大的那一段
+                self.current_conversation_id = max(
+                    self.conversations.keys(),
+                    key=lambda k: str(self.conversations[k].get(
+                        'last_interaction_time', ''))
+                )
+            else:
+                self.current_conversation_id = None
+
+        self.reorder_conversation_ids()
+        self.save_conversations()
+        return True, "删除成功", self.current_conversation_id
     
     def reorder_conversation_ids(self):
         """重新排序对话ID"""

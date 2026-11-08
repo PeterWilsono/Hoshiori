@@ -1,30 +1,34 @@
 // ===== 主题管理 - 星织AI助手 =====
 
-// 主题配置
+// 主题配置：四套印刷品气质
 const THEMES = {
     glass: {
         name: 'glass',
-        displayName: '🔮 幻境玻璃',
-        icon: '🔮',
-        description: '科幻透明光影'
+        displayName: '夜航',
+        latin: 'Nocturne',
+        description: '墨蓝夜空 · 月光石',
+        swatches: ['#0a0d14', '#a9bdf0', '#e6c39b']
     },
     clay: {
         name: 'clay',
-        displayName: '☁️ 软萌黏土',
-        icon: '☁️',
-        description: '新拟态3D质感'
+        displayName: '朝霧',
+        latin: 'Asagiri',
+        description: '苔原晨雾 · 暖陶',
+        swatches: ['#e9ede3', '#3f7358', '#a86a4c']
     },
     fresh: {
         name: 'fresh',
-        displayName: '🍃 清新日系',
-        icon: '🍃',
-        description: '极简留白纸质'
+        displayName: '纸白',
+        latin: 'Paper',
+        description: '象牙纸 · 墨蓝字',
+        swatches: ['#f7f4ec', '#2e4b76', '#a3653a']
     },
     dark: {
         name: 'dark',
-        displayName: '🌙 深邃暗夜',
-        icon: '🌙',
-        description: '赛博朋克霓虹'
+        displayName: '曜石',
+        latin: 'Obsidian',
+        description: '曜石黑 · 暖金',
+        swatches: ['#0a0a0b', '#d7b689', '#f0ede7']
     }
 };
 
@@ -35,7 +39,6 @@ let currentTheme = 'glass';
  * 初始化主题系统
  */
 async function initTheme() {
-    // 从Python获取当前主题
     try {
         const savedTheme = await eel.get_current_theme()();
         if (savedTheme && THEMES[savedTheme]) {
@@ -45,14 +48,15 @@ async function initTheme() {
         console.log('Using default theme');
     }
 
-    applyTheme(currentTheme);
+    applyTheme(currentTheme, true);
 }
 
 /**
  * 应用主题
  * @param {string} themeName - 主题名称
+ * @param {boolean} silent - 是否跳过过渡动效
  */
-function applyTheme(themeName) {
+function applyTheme(themeName, silent = false) {
     if (!THEMES[themeName]) {
         console.error('Unknown theme:', themeName);
         return;
@@ -61,18 +65,18 @@ function applyTheme(themeName) {
     currentTheme = themeName;
     document.body.setAttribute('data-theme', themeName);
 
-    // 添加主题切换过渡效果
-    document.body.classList.add('theme-transition');
-    setTimeout(() => {
-        document.body.classList.remove('theme-transition');
-    }, 800);
+    if (!silent) {
+        document.body.classList.add('theme-transition');
+        setTimeout(() => {
+            document.body.classList.remove('theme-transition');
+        }, 560);
+    }
 
-    // 保存到Python
     if (typeof eel !== 'undefined') {
         eel.save_theme(themeName);
     }
 
-    console.log(`Theme changed to: ${THEMES[themeName].displayName}`);
+    console.log(`Theme → ${THEMES[themeName].displayName}`);
 }
 
 /**
@@ -80,46 +84,42 @@ function applyTheme(themeName) {
  */
 function openThemeSelector() {
     const themesHtml = Object.values(THEMES).map(theme => `
-        <div class="theme-card ${currentTheme === theme.name ? 'active' : ''}" 
-             onclick="selectTheme('${theme.name}')">
-            <div class="theme-icon">${theme.icon}</div>
-            <div class="theme-name">${theme.displayName}</div>
+        <div class="theme-card ${currentTheme === theme.name ? 'active' : ''}"
+             data-theme-name="${theme.name}"
+             onclick="selectTheme('${theme.name}', this)">
+            <div class="theme-icon">
+                ${theme.swatches.map(c => `<span style="background:${c}"></span>`).join('')}
+            </div>
+            <div class="theme-name">${theme.displayName} <em>${theme.latin}</em></div>
             <div class="theme-description">${theme.description}</div>
         </div>
     `).join('');
 
     createModal(
-        '🎨 主题选择',
+        '选择气质',
         `<div class="theme-grid">${themesHtml}</div>`,
         [
-            {
-                text: '关闭',
-                style: 'btn-ghost',
-                onClick: () => { }
-            }
+            { text: '完成', style: 'btn-ghost', onClick: () => {} }
         ]
     );
 }
 
 /**
  * 选择主题
- * @param {string} themeName - 主题名称
+ * @param {string} themeName
+ * @param {HTMLElement} el
  */
-function selectTheme(themeName) {
+function selectTheme(themeName, el) {
     applyTheme(themeName);
 
-    // 更新主题卡片active状态
-    document.querySelectorAll('.theme-card').forEach(card => {
-        card.classList.remove('active');
-    });
-    event.currentTarget.classList.add('active');
+    document.querySelectorAll('.theme-card').forEach(card => card.classList.remove('active'));
+    if (el) el.classList.add('active');
 
-    showNotification(`已切换到 ${THEMES[themeName].displayName}`, 'success', 2000);
+    showNotification(`已换成「${THEMES[themeName].displayName}」`, 'success', 1800);
 }
 
 /**
  * 获取当前主题
- * @returns {string} 当前主题名称
  */
 function getCurrentTheme() {
     return currentTheme;
@@ -127,7 +127,6 @@ function getCurrentTheme() {
 
 /**
  * 从Python接收主题更新
- * @param {string} themeName - 主题名称
  */
 eel.expose(applyThemeFromPython);
 function applyThemeFromPython(themeName) {

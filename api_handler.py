@@ -413,11 +413,14 @@ JSON格式(严格遵守):
                 "api-key": self.api_key
             }
             
+            # MiMo V2.6 在思考模式下固定 temperature=1.0 / top_p=0.95，传别的值会被忽略
+            is_reasoning_provider = self.provider == "mimo"
+
             payload = {
                 "model": self.model,
                 "messages": api_messages,
                 "max_completion_tokens": 1024,
-                "temperature": 0.3,
+                "temperature": 1.0 if is_reasoning_provider else 0.3,
                 "top_p": 0.95,
                 "stream": False,
                 "frequency_penalty": 0,

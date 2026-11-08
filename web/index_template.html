@@ -1,158 +1,343 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" translate="no" class="notranslate">
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星织 - 智能对话助手</title>
+    <meta name="color-scheme" content="dark light">
+    <meta name="google" content="notranslate">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#090c12">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230b0e14'/%3E%3Cpath d='M12 5.2l1.7 5.1 5.1 1.7-5.1 1.7L12 18.8l-1.7-5.1-5.1-1.7 5.1-1.7z' fill='%23a9bdf0'/%3E%3C/svg%3E">
+    <title>星织 · Hoshiori</title>
 
     <!-- 样式文件 -->
-    <link rel="stylesheet" href="css/base.css?v=1767595725">
-    <link rel="stylesheet" href="css/themes.css?v=1767595725">
-    <link rel="stylesheet" href="css/components.css?v=1767595725">
-    <link rel="stylesheet" href="css/animations.css?v=1767595725">
-    
-    <!-- Live2D SDK - 使用本地备份避免CDN超时 -->
-    <!-- Cubism 4 核心 (始终需要) -->
-    <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js" 
-            onerror="console.error('Cubism Core加载失败，Live2D功能将不可用')"></script>
-    <!-- PixiJS -->
-    <script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js"
-            onerror="console.error('PixiJS加载失败，Live2D功能将不可用')"></script>
-    <!-- Cubism 4 -->
-    <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"
-            onerror="console.error('Cubism4加载失败，Live2D功能将不可用')"></script>
+    <link rel="stylesheet" href="css/base.css?v=1794134307">
+    <link rel="stylesheet" href="css/themes.css?v=1794134307">
+    <link rel="stylesheet" href="css/components.css?v=1794134307">
+    <link rel="stylesheet" href="css/animations.css?v=1794134307">
+
+    <!-- Cubism Core (官方 CDN，Live2D 运行时必需) -->
+    <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"
+            onerror="console.error('Cubism Core 加载失败，Live2D 将降级为静态立绘')"></script>
+    <!-- PixiJS + Cubism4 渲染插件（本地优先，CDN 兜底） -->
+    <script src="lib/pixi.min.js"
+            onerror="this.onerror=null;document.write('<script src=&quot;https://unpkg.com/pixi.js@6.5.10/dist/browser/pixi.min.js&quot;><\/script>')"></script>
+    <script src="lib/pixi-live2d-display.cubism4.min.js"
+            onerror="this.onerror=null;document.write('<script src=&quot;https://unpkg.com/pixi-live2d-display@0.4.0/dist/cubism4.min.js&quot;><\/script>')"></script>
 
     <!-- Eel JavaScript -->
     <script type="text/javascript" src="/eel.js"></script>
 </head>
 
-<body data-theme="glass">
-    <!-- 主容器 -->
-    <div class="app-container">
-        <!-- 左侧角色视窗 -->
-        <aside class="avatar-section" id="avatarSection">
-            <!-- 角色立绘 -->
-            <div class="avatar-container">
-                <img id="avatarImage" src="" alt="角色立绘" class="avatar-image">
+<body data-theme="glass" data-mood="neutral">
+
+    <!-- ===== 图标精灵 ===== -->
+    <svg class="icon-sprite" aria-hidden="true" focusable="false">
+        <symbol id="i-star" viewBox="0 0 24 24">
+            <path d="M12 2c.5 5.5 4.5 9.5 10 10-5.5.5-9.5 4.5-10 10-.5-5.5-4.5-9.5-10-10 5.5-.5 9.5-4.5 10-10z"
+                fill="currentColor" />
+        </symbol>
+        <symbol id="i-swap" viewBox="0 0 24 24">
+            <path d="M19.6 12a7.6 7.6 0 1 1-2.2-5.4" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" />
+            <path d="M19.8 4.4v4.4h-4.4" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round" />
+        </symbol>
+        <symbol id="i-spark" viewBox="0 0 24 24">
+            <path d="M12 4v16M4 12h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </symbol>
+        <symbol id="i-history" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="1.5" />
+            <path d="M12 7.4V12l3.1 2.1" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round" />
+        </symbol>
+        <symbol id="i-sliders" viewBox="0 0 24 24">
+            <path d="M4 8.5h9M17.5 8.5H20M4 15.5h3.5M12 15.5h8" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" />
+            <circle cx="15.2" cy="8.5" r="1.9" fill="none" stroke="currentColor" stroke-width="1.5" />
+            <circle cx="9.6" cy="15.5" r="1.9" fill="none" stroke="currentColor" stroke-width="1.5" />
+        </symbol>
+        <symbol id="i-portrait" viewBox="0 0 24 24">
+            <rect x="4.2" y="3.6" width="15.6" height="16.8" rx="3.2" fill="none" stroke="currentColor"
+                stroke-width="1.5" />
+            <circle cx="12" cy="10.2" r="2.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+            <path d="M7.8 17.6c1-2.3 2.5-3.4 4.2-3.4s3.2 1.1 4.2 3.4" fill="none" stroke="currentColor"
+                stroke-width="1.5" stroke-linecap="round" />
+        </symbol>
+        <symbol id="i-clip" viewBox="0 0 24 24">
+            <path d="M15.6 7.8l-6.3 6.3a2.6 2.6 0 003.7 3.7l6.3-6.3a4.6 4.6 0 00-6.5-6.5l-6.3 6.3a6.5 6.5 0 009.2 9.2l3-3"
+                fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </symbol>
+        <symbol id="i-send" viewBox="0 0 24 24">
+            <path d="M12 19.2V4.8M5.8 11l6.2-6.2L18.2 11" fill="none" stroke="currentColor" stroke-width="1.7"
+                stroke-linecap="round" stroke-linejoin="round" />
+        </symbol>
+        <symbol id="i-down" viewBox="0 0 24 24">
+            <path d="M5.8 9.4L12 15.6l6.2-6.2" fill="none" stroke="currentColor" stroke-width="1.6"
+                stroke-linecap="round" stroke-linejoin="round" />
+        </symbol>
+        <symbol id="i-close" viewBox="0 0 24 24">
+            <path d="M6.4 6.4l11.2 11.2M17.6 6.4L6.4 17.6" fill="none" stroke="currentColor" stroke-width="1.6"
+                stroke-linecap="round" />
+        </symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24">
+            <rect x="9" y="9" width="10.2" height="11.4" rx="2.4" fill="none" stroke="currentColor"
+                stroke-width="1.5" />
+            <path d="M14.6 6.4V6a2.2 2.2 0 00-2.2-2.2H6.6A2.2 2.2 0 004.4 6v6.2a2.2 2.2 0 002.2 2.2h.4" fill="none"
+                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </symbol>
+        <symbol id="i-check" viewBox="0 0 24 24">
+            <path d="M5 12.6l4.9 4.9L19.2 7.2" fill="none" stroke="currentColor" stroke-width="1.7"
+                stroke-linecap="round" stroke-linejoin="round" />
+        </symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24">
+            <path d="M4.6 7h14.8M9.6 7V5.4h4.8V7M6.7 7l.7 12.2h9.2L17.3 7" fill="none" stroke="currentColor"
+                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </symbol>
+        <symbol id="i-voice" viewBox="0 0 24 24">
+            <path d="M4.4 10v4h3l4.2 3.6V6.4L7.4 10h-3z" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linejoin="round" />
+            <path d="M15.4 9.4a3.6 3.6 0 010 5.2" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" />
+            <path d="M17.9 6.6a7.4 7.4 0 010 10.8" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" />
+        </symbol>
+        <symbol id="i-mute" viewBox="0 0 24 24">
+            <path d="M4.4 10v4h3l4.2 3.6V6.4L7.4 10h-3z" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linejoin="round" />
+            <path d="M15.4 10.2l4.2 3.6M19.6 10.2l-4.2 3.6" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" />
+        </symbol>
+        <symbol id="i-cloud" viewBox="0 0 24 24">
+            <path d="M7.4 18h9.2a3.6 3.6 0 00.4-7.2 5.4 5.4 0 00-10.3-1.2A3.9 3.9 0 007.4 18z" fill="none"
+                stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+        </symbol>
+        <symbol id="i-chip" viewBox="0 0 24 24">
+            <rect x="6.4" y="6.4" width="11.2" height="11.2" rx="2.2" fill="none" stroke="currentColor"
+                stroke-width="1.5" />
+            <path d="M10 3.4v3M14 3.4v3M10 17.6v3M14 17.6v3M3.4 10h3M3.4 14h3M17.6 10h3M17.6 14h3" fill="none"
+                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </symbol>
+    </svg>
+
+    <!-- ===== 环境光层 ===== -->
+    <div class="ambient" aria-hidden="true">
+        <div class="ambient__aura"></div>
+        <div class="ambient__mesh"></div>
+        <div class="ambient__stars"></div>
+        <div class="ambient__grain"></div>
+    </div>
+
+    <div class="app-container" id="appContainer">
+
+        <!-- ===== 窗口栏 ===== -->
+        <header class="titlebar" id="titlebar">
+            <div class="titlebar__brand" onmousedown="beginWindowDrag(event)">
+                <svg class="titlebar__star" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-star"></use></svg>
+                <span class="titlebar__name">星织</span>
+                <span class="titlebar__latin">HOSHIIORI</span>
             </div>
 
-            <!-- 状态卡片 -->
-            <div class="status-card glass-panel">
-                <!-- 好感度 -->
-                <div class="stat-group">
-                    <label class="stat-label">好感度 · Affection</label>
-                    <div class="stat-value" id="affectionValue">50</div>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="affectionBar" style="width: 50%"></div>
-                    </div>
-                </div>
+            <div class="titlebar__session" id="titlebarSession" title="" onmousedown="beginWindowDrag(event)"></div>
 
-                <!-- 分隔线 -->
-                <div class="divider"></div>
-
-                <!-- 情绪 -->
-                <div class="stat-group">
-                    <label class="stat-label" id="moodLabel">情绪 · 平静</label>
-                </div>
-                
-                <!-- 分隔线 -->
-                <div class="divider"></div>
-                
-                <!-- 模型切换 -->
-                <div class="stat-group">
-                    <label class="stat-label">Live2D 模型</label>
-                    <button class="btn btn-sm btn-outline" onclick="openModelSelector()" style="margin-top: 5px; width: 100%;">
-                        🎭 切换模型
-                    </button>
-                </div>
+            <div class="titlebar__actions">
+                <button class="titlebar__btn" type="button" onclick="openSettings()" aria-label="设置">
+                    <svg class="icon icon-sm"><use href="#i-sliders"></use></svg>
+                </button>
+                <button class="titlebar__btn titlebar__btn--close" type="button" onclick="requestQuit()"
+                    aria-label="关闭星织">
+                    <svg class="icon icon-sm"><use href="#i-close"></use></svg>
+                </button>
             </div>
-        </aside>
+        </header>
 
-        <!-- 右侧聊天区域 -->
-        <main class="chat-section">
-            <!-- 顶部工具栏 -->
-            <header class="toolbar glass-panel">
-                <div class="toolbar-left">
-                    <h1 class="app-title">星织</h1>
+        <div class="app-body">
+
+        <!-- ===== 左侧：光室（角色） ===== -->
+        <aside class="avatar-section" id="avatarSection" aria-label="角色状态">
+            <header class="chamber-head">
+                <div class="chamber-meta">
+                    <span class="chamber-meta__dot" aria-hidden="true"></span>
+                    <span class="chamber-meta__name" id="chamberModelName">优米</span>
+                    <span class="chamber-meta__latin" id="chamberModelLatin">YUMI</span>
                 </div>
-
-                <div class="toolbar-center">
-
-
-
-
-
-
-
-                </div>
-
-                <div class="toolbar-right">
-                    <!-- 新对话 -->
-                    <button class="btn btn-primary" onclick="newConversation()">
-                        ✨ 新对话
+                <div class="chamber-head__actions">
+                    <button class="icon-btn" id="modelSelectorBtn" onclick="openModelSelector()"
+                        aria-label="切换角色形象" data-hint="切换角色">
+                        <svg class="icon"><use href="#i-swap"></use></svg>
                     </button>
-
-                    <!-- 对话列表 -->
-                    <button class="btn btn-ghost" onclick="showConversationList()">
-                        📋 历史
-                    </button>
-
-
-
-
-
-                    <!-- 设置 -->
-                    <button class="btn btn-ghost" onclick="openSettings()">
-                        ⚙ 设置
+                    <button class="icon-btn chamber-close" id="chamberCloseBtn" aria-label="收起光室" data-hint="收起"
+                        onclick="togglePortrait()">
+                        <svg class="icon"><use href="#i-close"></use></svg>
                     </button>
                 </div>
             </header>
 
-            <!-- 聊天内容区 -->
-            <div class="chat-container" id="chatContainer">
-                <div class="chat-messages" id="chatMessages">
-                    <!-- 消息将动态插入此处 -->
+            <!-- 角色立绘（Live2D 挂载点） -->
+            <div class="avatar-container" id="portraitStage">
+                <div class="portrait-aura" aria-hidden="true"></div>
+                <div class="portrait-rings" aria-hidden="true">
+                    <span></span><span></span><span></span>
+                </div>
+                <img id="avatarImage" src="" alt="星织立绘" class="avatar-image">
+                <div class="portrait-placeholder" aria-hidden="true">
+                    <span class="portrait-placeholder__mark">織</span>
+                    <span class="portrait-placeholder__label">HOSHIIORI</span>
+                </div>
+                <div class="portrait-caption">
+                    <span class="portrait-caption__name">星织</span>
+                    <span class="portrait-caption__divider"></span>
+                    <span class="portrait-caption__hint">轻触立绘 · 她会回应你</span>
                 </div>
             </div>
 
-            <!-- 底部输入区 -->
-            <footer class="input-section">
-                <div class="input-container glass-panel">
-                    <!-- 文件上传提示 -->
-                    <div class="file-indicator" id="fileIndicator" style="display: none;">
-                        <span id="fileInfo"></span>
-                        <button class="btn-icon" onclick="clearFile()">✖</button>
+            <!-- 状态 -->
+            <footer class="chamber-foot">
+                <div class="affection">
+                    <div class="affection__head">
+                        <span class="label">好感度 <em>Affection</em></span>
+                        <span class="affection__value" id="affectionValue">50</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="affectionBar" style="width: 50%"></div>
+                    </div>
+                    <div class="affection__scale">
+                        <span>疏</span><span>熟</span><span>亲</span>
+                    </div>
+                </div>
+
+                <div class="mood-row">
+                    <span class="label">情绪 <em>Mood</em></span>
+                    <span class="mood" id="moodLabel" data-mood="neutral"><i class="mood__dot"></i>平静</span>
+                </div>
+
+                <div class="chamber-toggles">
+                    <button class="pill" id="modeChip" onclick="toggleModelMode()" aria-label="切换运行模式">
+                        <svg class="icon icon-sm"><use href="#i-cloud"></use></svg>
+                        <span id="modeChipText">在线</span>
+                    </button>
+                    <button class="pill" id="ttsChip" onclick="toggleVoice()" aria-label="切换语音朗读">
+                        <svg class="icon icon-sm"><use href="#i-voice"></use></svg>
+                        <span id="ttsChipText">语音关闭</span>
+                    </button>
+                </div>
+            </footer>
+        </aside>
+
+        <!-- ===== 右侧：对话 ===== -->
+        <main class="chat-section">
+            <header class="toolbar glass-panel">
+                <div class="toolbar-left">
+                    <button class="icon-btn portrait-toggle" id="portraitToggle" onclick="togglePortrait()"
+                        aria-label="显示角色光室" data-hint="角色">
+                        <svg class="icon"><use href="#i-portrait"></use></svg>
+                    </button>
+                    <div class="thread">
+                        <span class="thread-meta" id="threadMeta">此刻 · 平静</span>
+                    </div>
+                </div>
+
+                <div class="toolbar-right">
+                    <button class="btn btn-primary" onclick="newConversation()">
+                        <svg class="icon icon-sm"><use href="#i-spark"></use></svg>
+                        <span>新对话</span>
+                    </button>
+                    <button class="icon-btn" onclick="showConversationList()" aria-label="历史对话" data-hint="历史">
+                        <svg class="icon"><use href="#i-history"></use></svg>
+                    </button>
+                    <button class="icon-btn" onclick="openSettings()" aria-label="全局设置" data-hint="设置">
+                        <svg class="icon"><use href="#i-sliders"></use></svg>
+                    </button>
+                </div>
+            </header>
+
+            <div class="chat-viewport">
+                <div class="chat-container" id="chatContainer" role="region" aria-label="对话记录" tabindex="-1">
+                    <div class="session-head" id="sessionHead" hidden>
+                        <span class="session-head__line"></span>
+                        <span class="session-head__label" id="sessionHeadLabel">今夜</span>
+                        <span class="session-head__line"></span>
                     </div>
 
-                    <!-- 输入框 -->
-                    <textarea id="messageInput" class="message-input" placeholder="输入消息..." rows="3"></textarea>
+                    <div class="chat-messages is-empty" id="chatMessages" role="log" aria-live="polite" aria-relevant="additions">
+                        <!-- 消息动态插入 -->
+                    </div>
 
-                    <!-- 按钮组 -->
-                    <div class="input-buttons">
-                        <button class="btn-icon btn-upload" onclick="uploadFile()">
-                            📎
+                    <!-- 空状态 -->
+                    <section class="welcome" id="welcomeState" aria-hidden="true">
+                        <span class="welcome__star" aria-hidden="true">
+                            <svg viewBox="0 0 24 24"><use href="#i-star"></use></svg>
+                        </span>
+                        <p class="welcome__eyebrow">A QUIET HOUR · 今夜</p>
+                        <h2 class="welcome__title">今夜，想说些什么</h2>
+                        <p class="welcome__lede">
+                            我记得你说过的每一件小事。<br>
+                            慢慢说，时间还长。
+                        </p>
+                        <div class="welcome__chips">
+                            <button class="chip" data-prompt="今天有点累，陪我说说话吧">今天有点累…</button>
+                            <button class="chip" data-prompt="你还记得我们第一次聊天时聊了什么吗">你还记得我吗</button>
+                            <button class="chip" data-prompt="给我讲一个温柔的小故事">讲个故事吧</button>
+                            <button class="chip" data-prompt="帮我把今天要做的事情理一理，我有点乱">帮我理清思路</button>
+                        </div>
+
+                        <button class="welcome__resume" id="resumeHint" hidden>
+                            <span class="welcome__resume-label">上次停在这里</span>
+                            <span class="welcome__resume-title" id="resumeTitle"></span>
+                            <svg class="icon icon-sm"><use href="#i-down"></use></svg>
                         </button>
-                        <button class="btn-icon btn-send" onclick="sendMessage()">
-                            ✈
+                    </section>
+
+                </div>
+
+                <button class="scroll-pill" id="scrollPill" onclick="scrollToLatest()" aria-label="回到最新消息">
+                    <svg class="icon icon-sm"><use href="#i-down"></use></svg>
+                </button>
+            </div>
+
+            <footer class="input-section">
+                <div class="composer input-container glass-panel" id="composer">
+                    <div class="file-indicator" id="fileIndicator" style="display: none;">
+                        <svg class="icon icon-sm"><use href="#i-clip"></use></svg>
+                        <span id="fileInfo"></span>
+                        <button class="icon-btn icon-btn--tiny" onclick="clearFile()" aria-label="移除附件">
+                            <svg class="icon icon-sm"><use href="#i-close"></use></svg>
+                        </button>
+                    </div>
+
+                    <textarea id="messageInput" class="message-input" rows="1"
+                        placeholder="与星织说些什么…" aria-label="输入消息"></textarea>
+
+                    <div class="input-buttons">
+                        <button class="icon-btn" onclick="uploadFile()" aria-label="附加文本文件" data-hint="附加文件">
+                            <svg class="icon"><use href="#i-clip"></use></svg>
+                        </button>
+                        <span class="composer-hint">Enter 发送<span class="dot-sep">·</span>Shift + Enter 换行</span>
+                        <button class="btn-send" id="sendBtn" onclick="sendMessage()" aria-label="发送消息">
+                            <svg class="icon"><use href="#i-send"></use></svg>
                         </button>
                     </div>
                 </div>
+                <p class="composer-note">星织会记住你们之间发生的事，也会把你说的每句话留在本机。</p>
             </footer>
         </main>
+        </div>
     </div>
 
     <!-- 模态窗口容器 -->
     <div id="modalContainer"></div>
+    <div id="toastLayer" class="toast-layer" aria-live="polite" aria-atomic="false"></div>
 
     <!-- JavaScript文件 -->
-    <script src="js/utils.js?v=1767595725"></script>
-    <script src="js/theme.js?v=1767595725"></script>
-    <script src="js/chat.js?v=1767595725"></script>
-    <script src="js/main.js?v=1767595725"></script>
+    <script src="js/utils.js?v=1794134307"></script>
+    <script src="js/theme.js?v=1794134307"></script>
+    <script src="js/chat.js?v=1794134307"></script>
+    <script src="js/ui.js?v=1794134307"></script>
+    <script src="js/main.js?v=1794134307"></script>
 </body>
 
 </html>

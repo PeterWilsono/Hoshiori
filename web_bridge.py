@@ -10,13 +10,53 @@ import base64
 from tkinter import filedialog
 import tkinter as tk
 import re
+import socket
 import traceback
 import time
 import hashlib
+from datetime import datetime
+
+import window_shell
 
 
 # ⭐ 全局版本号 - 使用时间戳确保每次启动都是新版本
 APP_VERSION = str(int(time.time()))
+
+_TIME_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S")
+
+
+def _display_title(conv):
+    """对话的显示标题：优先用自动生成的「首句」，其次退回存档标题。"""
+    title = (conv.get('title') or '').strip() or '新对话'
+    if title.startswith('对话 '):
+        for msg in conv.get('messages', []):
+            if msg.get('role') in ('user', '你') and msg.get('content'):
+                text = re.sub(r'\s+', ' ', msg['content']).strip()
+                if text:
+                    return text[:22] + ('…' if len(text) > 22 else '')
+    return title
+
+
+def _to_epoch(value):
+    """把对话里保存的时间字段统一成 epoch 秒，供前端格式化。
+
+    历史数据里 last_interaction_time 是 '2026-11-08 17:20' 这样的字符串，
+    新数据可能是数字。解析不出来时返回 0，前端会显示为「更早」。
+    """
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        for fmt in _TIME_FORMATS:
+            try:
+                return int(datetime.strptime(text, fmt).timestamp())
+            except ValueError:
+                continue
+        try:
+            return int(float(text))
+        except ValueError:
+            return 0
+    return 0
 
 
 def get_resource_path(relative_path):
@@ -163,8 +203,10 @@ class WebBridge:
                     messages.append(clean_msg)
                 
                 return {
+                    'id': str(conv_id),
+                    'title': _display_title(conv),
                     'messages': messages,
-                    'timestamp': conv.get('timestamp', 0)
+                    'timestamp': _to_epoch(conv.get('last_interaction_time'))
                 }
             except Exception as e:
                 print(f"获取对话错误: {e}")
@@ -177,28 +219,22 @@ class WebBridge:
             try:
                 convs = []
                 current_id = self.app.conversation_manager.current_conversation_id
-                
+
                 for conv_id, conv_data in self.app.conversation_manager.conversations.items():
-                    # 获取对话标题（第一条AI消息的前20字）
-                    title = "新对话"
-                    for msg in conv_data.get('messages', []):
-                        if msg['role'] == '你' and msg['content']:
-                            title = msg['content'][:20] + ('...' if len(msg['content']) > 20 else '')
-                            break
-                    
                     convs.append({
                         'id': str(conv_id),
-                        'title': conv_data.get('title', title),
-                        'timestamp': conv_data.get('last_interaction_time', 0),
+                        'title': _display_title(conv_data),
+                        'timestamp': _to_epoch(conv_data.get('last_interaction_time')),
                         'message_count': len(conv_data.get('messages', [])),
                         'is_current': conv_id == current_id
                     })
-                
+
                 # 按时间倒序排序
                 convs.sort(key=lambda x: x['timestamp'], reverse=True)
                 return convs
             except Exception as e:
                 print(f"获取对话列表错误: {e}")
+                traceback.print_exc()
                 return []
         
         @eel.expose
@@ -225,15 +261,93 @@ class WebBridge:
         
         @eel.expose
         def delete_conversation_from_web(conv_id):
-            """删除对话"""
+            """删除对话
+
+            返回结构化的结果，前端据此决定是否需要重新载入对话区。
+            注意：删除会引起 ID 重排，调用后必须重新拉取对话列表。
+            """
             try:
-                # 转换为整数
                 conv_id = int(conv_id)
-                self.app.conversation_manager.delete_conversation(conv_id)
-                return True
+                manager = self.app.conversation_manager
+                was_current = conv_id == manager.current_conversation_id
+
+                ok, message, current_id = manager.delete_conversation(conv_id)
+
+                # 删掉的是当前对话：同步切换主程序状态，重建记忆图谱
+                if ok and was_current and current_id is not None:
+                    self.app.load_conversation(current_id)
+
+                remaining = len(manager.conversations)
+                return {
+                    'success': bool(ok),
+                    'message': message,
+                    'wasCurrent': bool(was_current),
+                    'currentId': str(current_id) if current_id is not None else None,
+                    'remaining': remaining
+                }
             except Exception as e:
                 print(f"删除对话错误: {e}")
+                traceback.print_exc()
+                return {
+                    'success': False,
+                    'message': str(e),
+                    'wasCurrent': False,
+                    'currentId': None,
+                    'remaining': 0
+                }
+
+        @eel.expose
+        def quit_app_from_web():
+            """从界面退出程序（前端已做过确认）"""
+            try:
+                self.app.conversation_manager.save_conversations()
+                print("👋 用户从界面关闭了星织")
+            except Exception as e:
+                print(f"退出前保存失败: {e}")
+
+            def _exit():
+                win = getattr(self.app, 'window', None)
+                if win is not None:
+                    try:
+                        win.destroy()
+                    except Exception:
+                        pass
+                try:
+                    window_shell.close_window()
+                except Exception:
+                    pass
+                time.sleep(0.25)
+                os._exit(0)
+
+            # 留一点时间让前端收到返回值、播放收场动画
+            import threading
+            threading.Timer(0.45, _exit).start()
+            return True
+
+        @eel.expose
+        def begin_window_drag():
+            """窗口栏按下时交给系统拖动"""
+            try:
+                return window_shell.begin_drag()
+            except Exception:
                 return False
+
+        @eel.expose
+        def minimize_window():
+            # frameless 窗口上 pywebview 的 minimize() 可能不生效，直接交给系统
+            try:
+                if window_shell.minimize():
+                    return True
+            except Exception:
+                pass
+            win = getattr(self.app, 'window', None)
+            if win is not None:
+                try:
+                    win.minimize()
+                    return True
+                except Exception:
+                    pass
+            return False
         
         # ===== 语音相关 =====
         @eel.expose
@@ -623,46 +737,155 @@ def start_web_app(app_instance, port=0):
     
     # 创建桥接
     bridge = WebBridge(app_instance)
-    
+
     # 将桥接实例保存到app中
     app_instance.web_bridge = bridge
-    
-    print(f"🚀 启动Web服务器...")
-    
-    def on_close(page, sockets):
-        print("❌ 窗口关闭，正在退出程序...")
-        sys.exit(0)
-    
-    # 启动Eel应用
-    # 尝试强制使用应用模式 (无地址栏)
-    try:
-        # 首选 Edge (通常Windows都有), 其次 Chrome
-        eel.start(
-            'index.html',
-            size=(1300, 900),
-            port=port,
-            mode='edge',         # 尝试强制 Edge 应用模式
-            close_callback=on_close,
-            cmdline_args=['--kiosk', '--disable-http-cache', '--disable-cache'] # ⭐ 禁用浏览器缓存
-        )
-    except Exception as e:
-        print(f"⚠️ Edge启动失败，尝试默认模式: {e}")
+
+    window_shell.enable_dpi_awareness()
+
+    if not port:
+        port = _pick_free_port()
+
+    url = 'http://127.0.0.1:%d/index.html' % port
+    print("🚀 启动本地服务: %s" % url)
+
+    # eel 的服务器跑在自己的线程里（它需要独立的 gevent hub），
+    # 主线程留给原生窗口，这样窗口不会带任何浏览器痕迹。
+    def _serve():
         try:
             eel.start(
                 'index.html',
-                size=(1300, 900),
                 port=port,
-                mode='chrome', # 尝试 Chrome
-                close_callback=on_close,
-                cmdline_args=['--disable-http-cache', '--disable-cache'] # ⭐ 禁用浏览器缓存
+                mode=None,
+                block=True,
+                shutdown_delay=1.0,
             )
-        except Exception as ex:
-             print(f"⚠️ Chrome启动失败，使用系统默认浏览器: {ex}")
-             eel.start(
-                'index.html',
-                size=(1300, 900),
-                port=port,
-                mode='default',
-                close_callback=on_close
-            )
+        except Exception as exc:
+            print("⚠️ eel 服务异常: %s" % exc)
 
+    import threading
+    server = threading.Thread(target=_serve, daemon=True)
+    server.start()
+
+    if not _wait_port(port, timeout=15):
+        print("⚠️ 本地服务未就绪")
+
+    if _start_native_window(app_instance, url):
+        return
+
+    # 没有 WebView2 时退回 Edge 应用窗口
+    print("⚠️ 原生窗口不可用，改用 Edge 应用窗口")
+    existing = [hwnd for hwnd, _ in window_shell.list_windows()]
+    window_shell.launch(url, 1300, 900)
+    hwnd = window_shell.adopt(existing, 1300, 900, timeout=40)
+
+    if hwnd is None:
+        print("⚠️ 没能接管应用窗口，改为用默认浏览器打开")
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception:
+            pass
+        return
+
+    while True:
+        time.sleep(1.0)
+        if not window_shell.is_alive():
+            print("❌ 窗口已关闭，程序退出")
+            try:
+                app_instance.conversation_manager.save_conversations()
+            except Exception:
+                pass
+            os._exit(0)
+
+
+def _start_native_window(app_instance, url):
+    """用 WebView2 开一个真正的原生窗口。
+
+    页面里照常加载 eel.js，所以和 Python 的通信方式完全不用改。
+    """
+    try:
+        import webview
+    except Exception as exc:
+        print("⚠️ 未安装 pywebview: %s" % exc)
+        return False
+
+    try:
+        window = webview.create_window(
+            '星织 · Hoshiori',
+            url,
+            width=1300,
+            height=900,
+            min_size=(960, 640),
+            frameless=True,
+            easy_drag=False,
+            background_color='#090c12',
+        )
+    except Exception as exc:
+        print("⚠️ 创建窗口失败: %s" % exc)
+        return False
+
+    app_instance.window = window
+
+    # 窗口已经出来了，撤掉启动画面
+    try:
+        import pyi_splash
+        pyi_splash.close()
+    except Exception:
+        pass
+
+    def _bind_handle():
+        # 必须放后台：这个回调在 GUI 线程里跑，卡住会让窗口假死甚至被关掉
+        def _find():
+            window_shell.find_by_title('星织', timeout=20, sleep=time.sleep)
+
+        import threading
+        threading.Thread(target=_find, daemon=True).start()
+
+    window.events.shown += _bind_handle
+
+    def _on_closed():
+        try:
+            app_instance.conversation_manager.save_conversations()
+        except Exception:
+            pass
+
+    window.events.closed += _on_closed
+
+    print("🪟 启动原生窗口")
+    try:
+        webview.start(private_mode=False, storage_path=os.path.join(
+            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'Hoshiori', 'webview'))
+    except Exception as exc:
+        print("⚠️ 原生窗口启动失败: %s" % exc)
+        return False
+
+    # webview.start() 在窗口关闭后返回
+    try:
+        app_instance.conversation_manager.save_conversations()
+    except Exception:
+        pass
+    os._exit(0)
+
+
+def _pick_free_port():
+    """挑一个空闲端口，eel 的 port=0 拿不到实际值。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(('127.0.0.1', 0))
+        return sock.getsockname()[1]
+
+
+def _wait_port(port, timeout=15):
+    """等服务真正开始监听。
+
+    这里必须用 eel.sleep（gevent），普通的 time.sleep 会占住主线程，
+    bottle 的 greenlet 拿不到执行机会，页面永远打不开。
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(('127.0.0.1', port), 0.4):
+                return True
+        except OSError:
+            eel.sleep(0.15)
+    return False

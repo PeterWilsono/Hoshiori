@@ -3,10 +3,44 @@
 星织 - 智能对话助手 (Web UI版)
 使用Eel框架实现现代化Web界面
 """
+import sys
+
+# 打包成无控制台程序后 sys.stdout / sys.stderr 是 None，
+# 任何一次 print 都会抛 AttributeError 直接把进程带走。
+# 所以要在其它模块导入之前先把这两个流接上。
+def _ensure_std_streams():
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+
+    base = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) \
+        else os.path.dirname(os.path.abspath(__file__))
+    log_dir = os.path.join(base, 'baocun')
+
+    stream = None
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, 'app.log')
+        if os.path.exists(log_path) and os.path.getsize(log_path) > 2 * 1024 * 1024:
+            os.remove(log_path)
+        stream = open(log_path, 'a', encoding='utf-8', buffering=1)
+    except Exception:
+        try:
+            stream = open(os.devnull, 'w', encoding='utf-8')
+        except Exception:
+            return
+
+    if sys.stdout is None:
+        sys.stdout = stream
+    if sys.stderr is None:
+        sys.stderr = stream
+
+
+import os
 import threading
 import re
-import os
 import json
+
+_ensure_std_streams()
 
 from tts_manager import TTSManager
 from config import ConfigManager

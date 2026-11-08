@@ -1,5 +1,8 @@
 // ===== 工具函数 - 星织AI助手 =====
 
+/* ---------- 模态栈 ---------- */
+const modalStack = [];
+
 /**
  * 创建并显示模态窗口
  * @param {string} title - 窗口标题
@@ -10,7 +13,10 @@
 function createModal(title, content, buttons = []) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
-    overlay.setAttribute('data-modal-id', Date.now()); // 添加唯一标识
+    overlay.setAttribute('data-modal-id', Date.now());
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', title);
 
     const modal = document.createElement('div');
     modal.className = 'modal-content';
@@ -20,7 +26,11 @@ function createModal(title, content, buttons = []) {
     header.className = 'modal-header';
     header.innerHTML = `
         <h2 class="modal-title">${title}</h2>
-        <button class="modal-close" onclick="closeModal(this)">✖</button>
+        <button class="modal-close" type="button" aria-label="关闭" onclick="closeModal(this)">
+            <svg class="icon" viewBox="0 0 24 24" style="width:15px;height:15px">
+                <use href="#i-close"></use>
+            </svg>
+        </button>
     `;
 
     // 内容
@@ -33,6 +43,7 @@ function createModal(title, content, buttons = []) {
     footer.className = 'modal-footer';
     buttons.forEach(btn => {
         const button = document.createElement('button');
+        button.type = 'button';
         button.className = `btn ${btn.style || 'btn-ghost'}`;
         button.textContent = btn.text;
         button.onclick = () => {
@@ -51,14 +62,19 @@ function createModal(title, content, buttons = []) {
 
     // 点击遮罩关闭（但不影响内容区域）
     overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {
-            closeModal(overlay);
-        }
+        if (e.target === overlay) closeModal(overlay);
     });
-    
-    // 阻止模态框内容的点击事件冒泡
-    modal.addEventListener('click', (e) => {
-        e.stopPropagation();
+
+    modal.addEventListener('click', (e) => e.stopPropagation());
+
+    modalStack.push(overlay);
+
+    // 焦点进入弹窗
+    requestAnimationFrame(() => {
+        const focusTarget = body.querySelector(
+            'input:not([type=hidden]):not([disabled]), textarea, select, button.btn-primary'
+        ) || header.querySelector('.modal-close');
+        if (focusTarget) focusTarget.focus({ preventScroll: true });
     });
 
     return overlay;
@@ -70,24 +86,105 @@ function createModal(title, content, buttons = []) {
  */
 function closeModal(element) {
     if (!element) {
-        // 如果没有传入元素，关闭所有模态框
-        const allModals = document.querySelectorAll('.modal-overlay');
-        allModals.forEach(modal => {
-            modal.style.animation = 'fadeOut 0.3s ease';
-            setTimeout(() => modal.remove(), 300);
-        });
+        document.querySelectorAll('.modal-overlay').forEach(modal => closeModal(modal));
         return;
     }
-    
-    const overlay = element.closest('.modal-overlay') || element;
-    if (overlay && overlay.parentNode) {
-        overlay.style.animation = 'fadeOut 0.3s ease';
-        setTimeout(() => {
-            if (overlay.parentNode) {
-                overlay.remove();
-            }
-        }, 300);
+
+    const overlay = element.closest ? (element.closest('.modal-overlay') || element) : element;
+    if (!overlay || !overlay.parentNode || overlay.classList.contains('is-closing')) return;
+
+    overlay.classList.add('is-closing');
+
+    const index = modalStack.indexOf(overlay);
+    if (index > -1) modalStack.splice(index, 1);
+
+    setTimeout(() => {
+        if (overlay.parentNode) overlay.remove();
+    }, 200);
+}
+
+// Esc 关闭最上层弹窗
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modalStack.length) {
+        e.preventDefault();
+        closeModal(modalStack[modalStack.length - 1]);
     }
+});
+
+/**
+ * 应用内确认框（替代浏览器原生 confirm）
+ * @param {Object} options
+ * @param {string} options.title - 标题
+ * @param {string} options.text - 说明文字
+ * @param {string} [options.confirmText] - 确认按钮文案
+ * @param {string} [options.cancelText] - 取消按钮文案
+ * @param {boolean} [options.danger] - 是否使用警示色
+ * @param {string} [options.note] - 次要备注
+ * @returns {Promise<boolean>}
+ */
+function confirmDialog(options = {}) {
+    const {
+        title = '确认一下',
+        text = '',
+        confirmText = '确定',
+        cancelText = '再想想',
+        danger = false,
+        note = ''
+    } = options;
+
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay confirm-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', title);
+
+        overlay.innerHTML = `
+            <div class="modal-content confirm-dialog">
+                <div class="confirm-dialog__body">
+                    <span class="confirm-dialog__mark" aria-hidden="true">
+                        <svg class="icon"><use href="#i-star"></use></svg>
+                    </span>
+                    <h2 class="confirm-dialog__title">${title}</h2>
+                    <p class="confirm-dialog__text">${text}</p>
+                    ${note ? `<p class="confirm-dialog__note">${note}</p>` : ''}
+                </div>
+                <div class="confirm-dialog__actions">
+                    <button type="button" class="btn btn-ghost confirm-dialog__cancel">${cancelText}</button>
+                    <button type="button" class="btn ${danger ? 'btn-danger' : 'btn-primary'} confirm-dialog__ok">${confirmText}</button>
+                </div>
+            </div>
+        `;
+
+        let settled = false;
+        const finish = (value) => {
+            if (settled) return;
+            settled = true;
+            document.removeEventListener('keydown', onKey, true);
+            closeModal(overlay);
+            resolve(value);
+        };
+
+        // Esc 关闭时也要给出结果，否则 await 会一直挂着
+        const onKey = (e) => {
+            if (e.key === 'Escape') finish(false);
+        };
+        document.addEventListener('keydown', onKey, true);
+
+        overlay.querySelector('.confirm-dialog__ok').addEventListener('click', () => finish(true));
+        overlay.querySelector('.confirm-dialog__cancel').addEventListener('click', () => finish(false));
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) finish(false);
+        });
+
+        document.getElementById('modalContainer').appendChild(overlay);
+        modalStack.push(overlay);
+
+        requestAnimationFrame(() => {
+            const ok = overlay.querySelector('.confirm-dialog__ok');
+            if (ok) ok.focus({ preventScroll: true });
+        });
+    });
 }
 
 /**
@@ -97,15 +194,30 @@ function closeModal(element) {
  * @param {number} duration - 显示时长(毫秒)
  */
 function showNotification(message, type = 'info', duration = 3000) {
+    let layer = document.getElementById('toastLayer');
+    if (!layer) {
+        layer = document.createElement('div');
+        layer.id = 'toastLayer';
+        layer.className = 'toast-layer';
+        layer.setAttribute('aria-live', 'polite');
+        document.body.appendChild(layer);
+    }
+
+    // 同时最多保留三条
+    while (layer.children.length >= 3) {
+        layer.removeChild(layer.firstElementChild);
+    }
+
     const notification = document.createElement('div');
     notification.className = `notification ${type}`;
+    notification.setAttribute('role', 'status');
     notification.textContent = message;
 
-    document.body.appendChild(notification);
+    layer.appendChild(notification);
 
     setTimeout(() => {
-        notification.style.animation = 'fadeOut 0.3s ease';
-        setTimeout(() => notification.remove(), 300);
+        notification.classList.add('is-closing');
+        setTimeout(() => notification.remove(), 240);
     }, duration);
 }
 
@@ -130,7 +242,15 @@ function formatTime(timestamp) {
     }
 
     // 更早
-    return date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    const clock = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    return `${date.getMonth() + 1}月${date.getDate()}日 ${clock}`;
+}
+
+/**
+ * 当前时间的「时:分」
+ */
+function nowClock() {
+    return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
 /**
@@ -140,7 +260,7 @@ function formatTime(timestamp) {
  */
 function escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = text == null ? '' : String(text);
     return div.innerHTML;
 }
 
@@ -158,9 +278,6 @@ function scrollToElement(element, smooth = true) {
 
 /**
  * 防抖函数
- * @param {Function} func - 要防抖的函数
- * @param {number} wait - 等待时间(毫秒)
- * @returns {Function} 防抖后的函数
  */
 function debounce(func, wait) {
     let timeout;
@@ -176,9 +293,6 @@ function debounce(func, wait) {
 
 /**
  * 节流函数
- * @param {Function} func - 要节流的函数
- * @param {number} limit - 间隔时间(毫秒)
- * @returns {Function} 节流后的函数
  */
 function throttle(func, limit) {
     let inThrottle;
@@ -193,8 +307,6 @@ function throttle(func, limit) {
 
 /**
  * 深拷贝对象
- * @param {*} obj - 要拷贝的对象
- * @returns {*} 拷贝后的对象
  */
 function deepClone(obj) {
     if (obj === null || typeof obj !== 'object') return obj;
@@ -257,19 +369,13 @@ const storage = {
 
 /**
  * 获取资源路径(兼容开发/打包环境)
- * @param {string} path - 相对路径
- * @returns {string} 绝对路径
  */
 function getResourcePath(path) {
-    // Eel会自动处理路径
     return path;
 }
 
 /**
  * 等待元素出现
- * @param {string} selector - CSS选择器
- * @param {number} timeout - 超时时间(毫秒)
- * @returns {Promise<HTMLElement>}
  */
 function waitForElement(selector, timeout = 5000) {
     return new Promise((resolve, reject) => {
@@ -280,10 +386,10 @@ function waitForElement(selector, timeout = 5000) {
         }
 
         const observer = new MutationObserver(() => {
-            const element = document.querySelector(selector);
-            if (element) {
+            const found = document.querySelector(selector);
+            if (found) {
                 observer.disconnect();
-                resolve(element);
+                resolve(found);
             }
         });
 
@@ -301,17 +407,15 @@ function waitForElement(selector, timeout = 5000) {
 
 /**
  * 复制文本到剪贴板
- * @param {string} text - 要复制的文本
- * @returns {boolean} 是否成功
  */
-async function copyToClipboard(text) {
+async function copyToClipboard(text, silent = false) {
     try {
         await navigator.clipboard.writeText(text);
-        showNotification('已复制到剪贴板', 'success', 2000);
+        if (!silent) showNotification('已复制到剪贴板', 'success', 2000);
         return true;
     } catch (e) {
         console.error('Copy failed:', e);
-        showNotification('复制失败', 'error', 2000);
+        if (!silent) showNotification('复制失败', 'error', 2000);
         return false;
     }
 }
@@ -320,8 +424,10 @@ async function copyToClipboard(text) {
 window.utils = {
     createModal,
     closeModal,
+    confirmDialog,
     showNotification,
     formatTime,
+    nowClock,
     escapeHtml,
     scrollToElement,
     debounce,

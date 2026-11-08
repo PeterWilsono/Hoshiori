@@ -53,11 +53,6 @@ GPT-sovits.md
 快速开始 - 打包发布.md
 extracted_text.txt
 
-# 打包生成的文件
-*.spec
-build/
-dist/
-
 # IDE配置
 .vscode/
 .idea/
@@ -65,3 +60,18 @@ dist/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 打包产物
+build/
+dist/
+*.spec
+app_icon.png
+
+# 运行日志
+*.log
+
+# 本地开发用（预览脚手架、记忆、截图）
+.workbuddy/
+
+# 打包用的浏览器运行时
+runtime/
