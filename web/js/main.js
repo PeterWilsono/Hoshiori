@@ -805,8 +805,8 @@ function updateUIFromState() {
 }
 
 eel.expose(updateAvatarDisplay);
-function updateAvatarDisplay(mood) {
-    updateMood(mood);
+function updateAvatarDisplay(mood, strength) {
+    updateMood(mood, strength);
 }
 
 eel.expose(updateAffection);

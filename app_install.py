@@ -202,11 +202,24 @@ def run_uninstall(install_dir, quiet=False):
     remove_shortcuts()
     remove_uninstall_entry()
 
-    # 自己删不掉自己：交给一个独立的 cmd，等 2 秒再删目录
-    script = 'ping -n 3 127.0.0.1 > nul & rmdir /s /q "%s"' % install_dir
+    # 自己删不掉自己：写一个临时 bat，等本进程退出后重试着删，
+    # 删干净了自己也退出（比 cmd 单行命令可靠得多，文件被占用时还会重试）
     try:
+        bat = os.path.join(os.environ.get("TEMP") or os.path.expanduser("~"), "hoshiori-uninstall.bat")
+        lines = [
+            "@echo off",
+            ":retry",
+            "ping -n 2 127.0.0.1 >nul",
+            'rmdir /s /q "%s" 2>nul' % install_dir,
+            'if exist "%s" goto retry' % install_dir,
+            'del "%~f0"',
+        ]
+        # newline="" 自己控制换行：文本模式下写 \r\n 会变成 \r\r\n，bat 直接跑不动。
+        # mbcs 跟系统 ANSI 代码页走，中文路径在 cmd 里才认得出来。
+        with open(bat, "w", encoding="mbcs", errors="replace", newline="") as f:
+            f.write("\r\n".join(lines) + "\r\n")
         subprocess.Popen(
-            ["cmd", "/c", script],
+            ["cmd", "/c", bat],
             creationflags=0x00000008 | 0x00000200,  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
             close_fds=True)
     except Exception as exc:
