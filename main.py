@@ -8,6 +8,7 @@ import os
 import time
 
 import boot
+import app_install
 
 #: 兼容旧代码里对 boot_ms / boot_log 的引用
 boot_ms = boot.ms
@@ -591,8 +592,23 @@ class AIChatAppWeb:
         return text.strip()
 
 
+def _handle_uninstall():
+    """被 `Hoshiori.exe --uninstall` 调起时走这里（Windows「应用和功能」里点的卸载）。"""
+    if not getattr(sys, 'frozen', False):
+        print("开发模式下不执行卸载")
+        return
+    install_dir = os.path.dirname(os.path.abspath(sys.executable))
+    quiet = '--quiet' in sys.argv
+    print("开始卸载: %s" % install_dir)
+    app_install.run_uninstall(install_dir, quiet=quiet)
+
+
 def main():
     """主函数"""
+    if app_install.is_uninstall_request():
+        _handle_uninstall()
+        return
+
     print("=" * 50)
     print("🌟 星织 - 智能对话助手")
     print("=" * 50)

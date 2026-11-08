@@ -20,14 +20,13 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import zipfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
 BUILD = os.path.join(ROOT, "build")
-VERSION = "1.2.2"
+VERSION = "1.3.0"
 APP = "Hoshiori"
 
 COMMON_ARGS = [
@@ -85,12 +84,58 @@ def stash_old_output():
     target = os.path.join(DIST, APP)
     if not os.path.isdir(target):
         return
-    trash = os.path.join(tempfile.gettempdir(), "hoshiori-old-%d" % int(time.time()))
+    # 必须在同一个盘里 rename：跨盘会退化成“复制 + 逐个删除”，
+    # 那样又会撞上批量删除的保护，反而把产物删一半。
+    trash = os.path.join(BUILD, "old-%d" % int(time.time()))
+    os.makedirs(BUILD, exist_ok=True)
     try:
-        shutil.move(target, trash)
+        os.rename(target, trash)
         print("旧产物已移到 %s" % trash)
     except Exception as exc:
         print("⚠️ 没能移走旧产物: %s" % exc)
+
+
+def build_installer():
+    """用目录版产物做安装包：payload.zip 塞进 setup.exe 里。"""
+    payload_dir = os.path.join(DIST, APP)
+    if not os.path.isdir(payload_dir):
+        print("⚠️ 没有目录版产物，先跑 python build.py dir")
+        return None
+
+    stage = os.path.join(BUILD, "installer")
+    os.makedirs(stage, exist_ok=True)
+    zip_path = os.path.join(stage, "payload.zip")
+
+    print("📦 打包安装负载 ...")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        for base, _dirs, files in os.walk(payload_dir):
+            for name in files:
+                full = os.path.join(base, name)
+                zf.write(full, os.path.relpath(full, payload_dir))
+    print("   payload.zip %.1f MB" % (os.path.getsize(zip_path) / 1024 / 1024))
+
+    name = "%s-Setup-%s" % (APP, VERSION)
+    args = [
+        sys.executable, "-m", "PyInstaller",
+        "--noconfirm", "--windowed", "--onefile",
+        "--name", name,
+        "--icon", os.path.join(ROOT, "app_icon.ico"),
+        "--add-data", os.path.join(ROOT, "installer", "ui.html") + os.pathsep + ".",
+        "--add-data", zip_path + os.pathsep + ".",
+        "--paths", ROOT,
+        "--hidden-import", "app_install",
+        "--collect-all", "webview",
+        "--collect-all", "pythonnet",
+        "--collect-all", "clr_loader",
+        "--distpath", DIST,
+        "--workpath", os.path.join(BUILD, "work-installer"),
+        "--specpath", os.path.join(BUILD, "spec-installer"),
+        os.path.join(ROOT, "installer", "setup.py"),
+    ]
+    started = time.time()
+    subprocess.run(args, cwd=ROOT, check=True)
+    print("✓ 安装包完成，用时 %.1f 秒" % (time.time() - started))
+    return os.path.join(DIST, name + ".exe")
 
 
 def make_zip():
@@ -117,7 +162,7 @@ def make_zip():
 
 def report():
     print("\n产物：")
-    for name in (APP, APP + ".exe"):
+    for name in (APP, APP + ".exe", "%s-Setup-%s.exe" % (APP, VERSION)):
         path = os.path.join(DIST, name)
         if os.path.isdir(path):
             total = sum(os.path.getsize(os.path.join(b, f))
@@ -130,7 +175,7 @@ def report():
 def main():
     parser = argparse.ArgumentParser(description="打包星织")
     parser.add_argument("mode", nargs="?", default="all",
-                        choices=["all", "dir", "onefile"])
+                        choices=["all", "dir", "onefile", "installer"])
     args = parser.parse_args()
 
     os.makedirs(DIST, exist_ok=True)
@@ -140,6 +185,8 @@ def main():
     if args.mode in ("all", "dir"):
         stash_old_output()
         run_pyinstaller("dir")
+    if args.mode in ("all", "installer"):
+        build_installer()
     if args.mode in ("all", "onefile"):
         run_pyinstaller("onefile")
     if args.mode in ("all", "dir"):

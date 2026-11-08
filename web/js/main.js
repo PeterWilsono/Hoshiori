@@ -177,6 +177,7 @@ const Live2DManager = {
             return true;
         } catch (e) {
             console.error('Live2D 加载失败:', e);
+            (window.__bootErrors = window.__bootErrors || []).push('l2d: ' + (e && e.message));
             this.fallback();
             return false;
         }
@@ -332,7 +333,24 @@ const Live2DManager = {
         this.baseHeight = this.model.height || this.app.screen.height;
 
         this.relayout();
+        this._mountEmotionRig();
         this.applyMoodExpression(this.currentMood);
+    },
+
+    /**
+     * 给当前模型装上情绪骨架（换模型/重载都要重装）
+     */
+    _mountEmotionRig() {
+        if (this.rig) {
+            try { this.rig.destroy(); } catch (e) { }
+            this.rig = null;
+        }
+        if (!this.model || typeof EmotionRig === 'undefined') return;
+        try {
+            this.rig = EmotionRig.create(this.model);
+        } catch (e) {
+            console.warn('情绪骨架初始化失败:', e);
+        }
     },
 
     async switchModel(id) {
@@ -396,21 +414,24 @@ const Live2DManager = {
     },
 
     /**
-     * 应用某个表情（先清掉旧表情，避免叠加）
-     * @param {string} name - neutral | happy | sad | angry | shy | surprised
+     * 应用某个情绪（走参数骨架，不再依赖 exp3 表情文件）
+     * @param {string} name - neutral | happy | sad | angry | shy | surprised | love | sleepy
+     * @param {number} [strength] - 0~1
      */
-    applyExpression(name) {
+    applyExpression(name, strength) {
         if (!this.model) return;
-        this.resetExpression();
-        const cfg = this.availableModels[this.currentModelId];
-        const exp = cfg && cfg.expressions ? cfg.expressions[name] : null;
-        if (!exp) return;
-        try { this.model.expression(exp); } catch (e) { }
+        const mood = typeof EmotionRig !== 'undefined' ? EmotionRig.normalize(name) : name;
+        this.lastExpression = mood;
+        if (this.rig) this.rig.setMood(mood, strength);
     },
 
     applyMoodExpression(mood) {
         this.currentMood = mood || 'neutral';
-        this.applyExpression(this.currentMood);
+        if (this.rig) {
+            this.rig.setMood(this.currentMood, this.moodStrength || 1);
+        } else {
+            this.pendingMood = this.currentMood;
+        }
     },
 
     /**
@@ -419,13 +440,14 @@ const Live2DManager = {
      * @param {number} holdMs
      */
     feel(name, holdMs = 5200) {
-        this.applyExpression(name);
-        const fx = { happy: 'heart', shy: 'blush', surprised: 'sparkle', sad: 'tear', angry: 'anger' };
-        if (fx[name]) this.showEffect(fx[name]);
+        this.applyExpression(name, 1);
+        const fx = { happy: 'heart', shy: 'blush', surprised: 'sparkle', sad: 'tear', angry: 'anger', love: 'heart' };
+        const mood = typeof EmotionRig !== 'undefined' ? EmotionRig.normalize(name) : name;
+        if (fx[mood]) this.showEffect(fx[mood]);
 
         clearTimeout(this.expressionTimer);
         this.expressionTimer = setTimeout(() => {
-            this.applyExpression(this.currentMood);
+            this.applyMoodExpression(this.currentMood);
         }, holdMs);
     },
 
@@ -630,8 +652,16 @@ const Live2DManager = {
         else if (p < -0.3 && a > 0.5) mood = 'angry';
         else if (p > 0 && d < -0.3) mood = 'shy';
         else if (a > 0.6) mood = 'surprised';
+
+        // 情绪浓度跟着 PAD 的强度走：同样的"开心"，很开心里表情更夸张
+        const strength = Math.max(0.35, Math.min(1, 0.45 + Math.abs(p) * 0.45 + Math.abs(a) * 0.25));
+
         if (mood !== this.currentMood) {
+            this.moodStrength = strength;
             this.applyMoodExpression(mood);
+        } else if (this.rig) {
+            this.moodStrength = strength;
+            this.rig.setStrength(strength);
         }
     },
 
@@ -643,9 +673,13 @@ const Live2DManager = {
         else if (/真的假的|居然|竟然/.test(text)) this.feel('surprised', 3200);
     },
 
-    updateMood(mood) {
-        if (mood !== this.currentMood) {
-            this.applyMoodExpression(mood);
+    updateMood(mood, strength) {
+        const next = typeof EmotionRig !== 'undefined' ? EmotionRig.normalize(mood) : mood;
+        if (typeof strength === 'number') this.moodStrength = strength;
+        if (next !== this.currentMood) {
+            this.applyMoodExpression(next);
+        } else if (this.rig) {
+            this.rig.setStrength(this.moodStrength || 1);
         }
     },
 

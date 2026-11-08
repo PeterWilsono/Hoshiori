@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="zh-CN" translate="no" class="notranslate">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安装 星织 Hoshiori</title>
+    <style>
+        :root {
+            --bg: #090c12;
+            --bg-2: #0d111a;
+            --ink-1: #ece8df;
+            --ink-2: #b7bcc7;
+            --ink-3: #8b93a1;
+            --ink-4: #79808f;
+            --line: rgba(233, 238, 248, 0.09);
+            --line-strong: rgba(233, 238, 248, 0.18);
+            --accent: #a9bdf0;
+            --accent-glow: rgba(169, 189, 240, 0.45);
+            --warm: #e6c39b;
+            --ease: cubic-bezier(.22, .61, .36, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+            background: var(--bg);
+            color: var(--ink-1);
+            font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+            -webkit-user-select: none;
+            user-select: none;
+            cursor: default;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(680px 420px at 72% -10%, rgba(116, 146, 226, .16), transparent 70%),
+                radial-gradient(520px 380px at 8% 108%, rgba(230, 195, 155, .08), transparent 72%);
+            pointer-events: none;
+        }
+
+        .shell {
+            position: relative;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ---------- 自绘标题栏 ---------- */
+        .bar {
+            height: 40px;
+            flex: 0 0 40px;
+            display: flex;
+            align-items: center;
+            padding: 0 6px 0 18px;
+            border-bottom: 1px solid var(--line);
+            font-size: 11px;
+            letter-spacing: .18em;
+            color: var(--ink-4);
+        }
+
+        .bar__star {
+            width: 12px;
+            height: 12px;
+            margin-right: 9px;
+            color: var(--accent);
+        }
+
+        .bar__spacer {
+            flex: 1;
+        }
+
+        .bar__btn {
+            width: 34px;
+            height: 26px;
+            border: 0;
+            border-radius: 7px;
+            background: transparent;
+            color: var(--ink-3);
+            display: grid;
+            place-items: center;
+            transition: background .18s, color .18s;
+        }
+
+        .bar__btn:hover {
+            background: rgba(255, 255, 255, .06);
+            color: var(--ink-1);
+        }
+
+        .bar__btn--close:hover {
+            background: #c4453c;
+            color: #fff;
+        }
+
+        /* ---------- 主体 ---------- */
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 34px 44px 0;
+            min-height: 0;
+        }
+
+        .step {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 0;
+            animation: rise .42s var(--ease) both;
+        }
+
+        .step.is-on {
+            display: flex;
+        }
+
+        .step[data-step="progress"] {
+            justify-content: flex-start;
+            padding-top: 14px;
+        }
+
+        @keyframes rise {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        .mark {
+            width: 62px;
+            height: 62px;
+            border-radius: 50%;
+            border: 1px solid var(--line-strong);
+            display: grid;
+            place-items: center;
+            margin-bottom: 22px;
+            color: var(--accent);
+            filter: drop-shadow(0 0 18px var(--accent-glow));
+        }
+
+        .mark svg {
+            width: 26px;
+            height: 26px;
+        }
+
+        h1 {
+            font-size: 25px;
+            font-weight: 400;
+            letter-spacing: .14em;
+        }
+
+        .sub {
+            margin-top: 12px;
+            font-size: 12.5px;
+            line-height: 1.9;
+            color: var(--ink-3);
+            max-width: 520px;
+        }
+
+        .sub em {
+            font-style: normal;
+            color: var(--ink-2);
+        }
+
+        .facts {
+            margin-top: 26px;
+            display: flex;
+            gap: 26px;
+            font-size: 11px;
+            letter-spacing: .06em;
+            color: var(--ink-4);
+        }
+
+        .facts b {
+            display: block;
+            margin-top: 6px;
+            font-weight: 500;
+            font-size: 13px;
+            letter-spacing: .02em;
+            color: var(--ink-2);
+        }
+
+        /* ---------- 安装位置 ---------- */
+        .field {
+            margin-top: 6px;
+        }
+
+        .label {
+            display: block;
+            margin-bottom: 9px;
+            font-size: 11.5px;
+            letter-spacing: .12em;
+            color: var(--ink-3);
+        }
+
+        .path {
+            display: flex;
+            gap: 8px;
+        }
+
+        .path input {
+            flex: 1;
+            height: 40px;
+            padding: 0 13px;
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            background: rgba(255, 255, 255, .03);
+            color: var(--ink-1);
+            font-family: "Cascadia Mono", Consolas, monospace;
+            font-size: 12px;
+            outline: none;
+            transition: border-color .18s, background .18s;
+            -webkit-user-select: text;
+            user-select: text;
+        }
+
+        .path input:focus {
+            border-color: var(--accent-line, rgba(169, 189, 240, .4));
+            background: rgba(255, 255, 255, .05);
+        }
+
+        .btn {
+            height: 40px;
+            padding: 0 18px;
+            border: 1px solid var(--line-strong);
+            border-radius: 9px;
+            background: transparent;
+            color: var(--ink-2);
+            font-size: 12px;
+            letter-spacing: .1em;
+            font-family: inherit;
+            transition: all .18s var(--ease);
+        }
+
+        .btn:hover {
+            border-color: var(--accent-line, rgba(169, 189, 240, .4));
+            color: var(--ink-1);
+            background: rgba(169, 189, 240, .06);
+        }
+
+        .btn--primary {
+            border: 0;
+            background: var(--ink-1);
+            color: #0b0e14;
+            font-weight: 500;
+        }
+
+        .btn--primary:hover {
+            background: #fff;
+            transform: translateY(-1px);
+            box-shadow: 0 12px 26px -14px rgba(255, 255, 255, .5);
+        }
+
+        .btn:disabled {
+            opacity: .4;
+            pointer-events: none;
+        }
+
+        .opts {
+            margin-top: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .opt {
+            display: flex;
+            align-items: center;
+            gap: 11px;
+            padding: 12px 2px;
+            border-bottom: 1px solid var(--line);
+            font-size: 12.5px;
+            color: var(--ink-2);
+        }
+
+        .opt:last-child {
+            border-bottom: 0;
+        }
+
+        .opt small {
+            margin-left: auto;
+            font-size: 11px;
+            color: var(--ink-4);
+        }
+
+        .box {
+            width: 16px;
+            height: 16px;
+            flex: 0 0 16px;
+            border: 1px solid var(--line-strong);
+            border-radius: 5px;
+            display: grid;
+            place-items: center;
+            transition: all .16s;
+            cursor: pointer;
+        }
+
+        .box svg {
+            width: 10px;
+            height: 10px;
+            opacity: 0;
+            transform: scale(.6);
+            transition: all .16s var(--ease);
+            color: #0b0e14;
+        }
+
+        .box.is-on {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .box.is-on svg {
+            opacity: 1;
+            transform: none;
+        }
+
+        /* ---------- 进度 ---------- */
+        .prog-title {
+            font-size: 14px;
+            letter-spacing: .1em;
+            color: var(--ink-2);
+        }
+
+        .track {
+            margin-top: 22px;
+            height: 3px;
+            border-radius: 3px;
+            background: var(--line);
+            overflow: hidden;
+        }
+
+        .fill {
+            height: 100%;
+            width: 0;
+            border-radius: 3px;
+            background: linear-gradient(90deg, var(--accent), var(--warm));
+            box-shadow: 0 0 14px var(--accent-glow);
+            transition: width .3s var(--ease);
+        }
+
+        .prog-meta {
+            margin-top: 13px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--ink-4);
+            font-family: "Cascadia Mono", Consolas, monospace;
+        }
+
+        .log {
+            margin-top: 26px;
+            flex: 1;
+            overflow: hidden;
+            font-size: 11px;
+            line-height: 2;
+            color: var(--ink-4);
+            font-family: "Cascadia Mono", Consolas, monospace;
+        }
+
+        .log div {
+            animation: rise .28s var(--ease) both;
+        }
+
+        .log .ok {
+            color: #8fd0a8;
+        }
+
+        /* ---------- 完成 ---------- */
+        .done-mark {
+            width: 62px;
+            height: 62px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            margin-bottom: 22px;
+            border: 1px solid rgba(143, 208, 168, .35);
+            color: #8fd0a8;
+            box-shadow: 0 0 26px -6px rgba(143, 208, 168, .4);
+        }
+
+        .done-mark svg {
+            width: 26px;
+            height: 26px;
+        }
+
+        /* ---------- 底栏 ---------- */
+        footer {
+            flex: 0 0 78px;
+            display: flex;
+            align-items: center;
+            padding: 0 44px;
+            gap: 10px;
+        }
+
+        footer .spacer {
+            flex: 1;
+        }
+
+        .hint {
+            font-size: 11px;
+            color: var(--ink-4);
+        }
+
+        .err {
+            color: #e08a7a;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="shell">
+        <div class="bar" id="titlebar">
+            <svg class="bar__star" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 2c.5 5.5 4.5 9.5 10 10-5.5.5-9.5 4.5-10 10-.5-5.5-4.5-9.5-10-10 5.5-.5 9.5-4.5 10-10z"
+                    fill="currentColor" />
+            </svg>
+            <span>星织 · HOSHIIORI · 安装程序</span>
+            <span class="bar__spacer"></span>
+            <button class="bar__btn bar__btn--close" onclick="Installer.close()" aria-label="关闭">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+            </button>
+        </div>
+
+        <main>
+            <!-- 1 欢迎 -->
+            <section class="step is-on" data-step="welcome">
+                <div class="mark">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 2c.5 5.5 4.5 9.5 10 10-5.5.5-9.5 4.5-10 10-.5-5.5-4.5-9.5-10-10 5.5-.5 9.5-4.5 10-10z"
+                            fill="currentColor" />
+                    </svg>
+                </div>
+                <h1>星织 Hoshiori</h1>
+                <p class="sub">
+                    一个有情绪、有记忆的桌面伙伴。<em>她会记住你们说过的话</em>，表情和视线都会跟着你走。
+                    装好以后双击图标就能打开，不需要 Python，也不需要联网注册。
+                </p>
+                <div class="facts">
+                    <div>版本<b id="factVersion">1.3.0</b></div>
+                    <div>占用空间<b id="factSize">约 130 MB</b></div>
+                    <div>数据位置<b>默认不占用 C 盘</b></div>
+                </div>
+            </section>
+
+            <!-- 2 选项 -->
+            <section class="step" data-step="options">
+                <h1 style="font-size:20px;">装到哪里？</h1>
+                <p class="sub" style="margin-bottom:22px;">这个文件夹就是它的“安装位置”，以后想搬走直接整个剪切就行。</p>
+
+                <div class="field">
+                    <label class="label">安装目录</label>
+                    <div class="path">
+                        <input id="installDir" spellcheck="false">
+                        <button class="btn" onclick="Installer.browse()">浏览…</button>
+                    </div>
+                </div>
+
+                <div class="opts">
+                    <label class="opt">
+                        <span class="box is-on" id="boxDesktop" onclick="Installer.toggle('desktop')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4 12l6 6L20 6" />
+                            </svg>
+                        </span>
+                        创建桌面快捷方式
+                        <small id="optDesktopHint">方便一键打开</small>
+                    </label>
+                    <label class="opt">
+                        <span class="box is-on" id="boxRun" onclick="Installer.toggle('run')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+                                stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4 12l6 6L20 6" />
+                            </svg>
+                        </span>
+                        安装完成后立即启动
+                        <small>先看看她长什么样</small>
+                    </label>
+                </div>
+
+                <p class="hint" id="spaceHint" style="margin-top:18px;"></p>
+            </section>
+
+            <!-- 3 进度 -->
+            <section class="step" data-step="progress">
+                <div class="prog-title" id="progTitle">正在解压文件…</div>
+                <div class="track">
+                    <div class="fill" id="progFill"></div>
+                </div>
+                <div class="prog-meta">
+                    <span id="progFile">准备中</span>
+                    <span id="progPct">0%</span>
+                </div>
+                <div class="log" id="progLog"></div>
+            </section>
+
+            <!-- 4 完成 -->
+            <section class="step" data-step="done">
+                <div class="done-mark">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 12.5l5.5 5.5L20 7" />
+                    </svg>
+                </div>
+                <h1 style="font-size:22px;">装好了</h1>
+                <p class="sub" id="doneSub">已经把星织放进你选的位置。桌面上的快捷方式可以直接打开她。</p>
+                <div class="facts">
+                    <div>安装位置<b id="donePath" style="font-size:11px;font-family:Consolas,monospace;">—</b></div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <span class="hint" id="footHint"></span>
+            <span class="spacer"></span>
+            <button class="btn" id="btnBack" style="display:none" onclick="Installer.back()">上一步</button>
+            <button class="btn btn--primary" id="btnNext" onclick="Installer.next()">开始安装</button>
+        </footer>
+    </div>
+
+    <script>
+        const Installer = {
+            step: 'welcome',
+            dir: '',
+            opts: { desktop: true, run: true },
+            busy: false,
+            inst: null,
+
+            async boot() {
+                try {
+                    this.inst = await window.pywebview.api.get_defaults();
+                } catch (e) {
+                    this.inst = { version: '1.3.0', default_dir: 'D:\\Hoshiori', free_gb: 0 };
+                }
+                document.getElementById('factVersion').textContent = this.inst.version || '1.3.0';
+                document.getElementById('installDir').value = this.inst.default_dir || '';
+                this.dir = this.inst.default_dir || '';
+                this.refreshSpace();
+            },
+
+            refreshSpace() {
+                const hint = document.getElementById('spaceHint');
+                const base = this.inst && this.inst.default_dir;
+                const chosen = (document.getElementById('installDir').value || '').trim();
+                const drive = (chosen.match(/^[A-Za-z]:/) || [null])[0];
+                const sameDrive = drive && base && drive.toUpperCase() === base.slice(0, 2).toUpperCase();
+                if (this.inst && typeof this.inst.free_gb === 'number' && (sameDrive || !base)) {
+                    hint.textContent = '这块磁盘还有 ' + this.inst.free_gb.toFixed(1) + ' GB 可用，安装只会占用约 130 MB。';
+                } else {
+                    hint.textContent = '安装只会占用约 130 MB；你的对话和配置会另外放在数据目录里。';
+                }
+            },
+
+            show(name) {
+                this.step = name;
+                document.querySelectorAll('.step').forEach(s => s.classList.toggle('is-on', s.dataset.step === name));
+
+                const back = document.getElementById('btnBack');
+                const next = document.getElementById('btnNext');
+                back.style.display = (name === 'options') ? '' : 'none';
+                next.disabled = false;
+
+                if (name === 'welcome') next.textContent = '开始安装';
+                if (name === 'options') next.textContent = '安装';
+                if (name === 'progress') {
+                    next.textContent = '正在安装…';
+                    next.disabled = true;
+                }
+                if (name === 'done') next.textContent = this.opts.run ? '启动星织' : '完成';
+                if (name === 'done') back.style.display = 'none';
+            },
+
+            toggle(key) {
+                this.opts[key] = !this.opts[key];
+                document.getElementById(key === 'desktop' ? 'boxDesktop' : 'boxRun')
+                    .classList.toggle('is-on', this.opts[key]);
+            },
+
+            async browse() {
+                const path = await window.pywebview.api.pick_dir(document.getElementById('installDir').value);
+                if (path) {
+                    document.getElementById('installDir').value = path;
+                    this.dir = path;
+                    this.refreshSpace();
+                }
+            },
+
+            async next() {
+                if (this.busy) return;
+
+                if (this.step === 'welcome') return this.show('options');
+
+                if (this.step === 'options') {
+                    const dir = (document.getElementById('installDir').value || '').trim();
+                    if (!dir) {
+                        document.getElementById('footHint').innerHTML = '<span class="err">请先选一个安装目录</span>';
+                        return;
+                    }
+                    this.dir = dir;
+                    document.getElementById('footHint').textContent = '';
+                    this.show('progress');
+                    this.busy = true;
+
+                    const res = await window.pywebview.api.install(dir, this.opts.desktop);
+                    this.busy = false;
+                    if (!res || !res.ok) {
+                        this.show('options');
+                        document.getElementById('footHint').innerHTML =
+                            '<span class="err">' + ((res && res.message) || '安装失败') + '</span>';
+                    }
+                    return;
+                }
+
+                if (this.step === 'done') {
+                    if (this.opts.run) window.pywebview.api.launch_app();
+                    window.pywebview.api.close();
+                }
+            },
+
+            back() {
+                if (this.step === 'options') this.show('welcome');
+            },
+
+            close() {
+                window.pywebview.api.close();
+            },
+
+            /* ---- 由 Python 回调 ---- */
+            onProgress(data) {
+                const pct = Math.max(0, Math.min(100, data.pct || 0));
+                document.getElementById('progFill').style.width = pct + '%';
+                document.getElementById('progPct').textContent = pct.toFixed(0) + '%';
+                if (data.label) document.getElementById('progFile').textContent = data.label;
+            },
+
+            onStep(label, done) {
+                const log = document.getElementById('progLog');
+                const line = document.createElement('div');
+                line.className = done ? 'ok' : '';
+                line.textContent = (done ? '✓ ' : '· ') + label;
+                log.appendChild(line);
+                while (log.children.length > 6) log.removeChild(log.firstChild);
+            },
+
+            onDone(path) {
+                document.getElementById('donePath').textContent = path;
+                document.getElementById('doneSub').textContent =
+                    '已经把星织放进这个位置。' + (this.opts.desktop ? '桌面上的快捷方式可以直接打开她。' : '可以从开始菜单打开她。');
+                document.getElementById('btnNext').disabled = false;
+                this.show('done');
+            },
+
+            onFail(message) {
+                this.show('options');
+                document.getElementById('footHint').innerHTML = '<span class="err">' + message + '</span>';
+            }
+        };
+
+        window.Installer = Installer;
+
+        window.addEventListener('pywebviewready', () => Installer.boot());
+        document.getElementById('installDir').addEventListener('input', () => Installer.refreshSpace());
+    </script>
+</body>
+
+</html>

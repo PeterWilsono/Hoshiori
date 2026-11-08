@@ -779,9 +779,15 @@ class WebBridge:
                 return False
     
     def send_to_web(self, function_name, *args):
-        """从Python调用JavaScript函数"""
+        """从 Python 调用前端函数。
+
+        不能直接用 getattr(eel, name)：页面连上之前那个属性是 mock，
+        只把调用塞进队列、根本不发 websocket。所以统一走 _js_call。
+        """
         try:
-            getattr(eel, function_name)(*args)
+            if not getattr(eel, '_websockets', None):
+                return          # 页面还没连上，静默跳过
+            eel._js_call(function_name, list(args))
         except Exception as e:
             print(f"调用Web函数错误 {function_name}: {e}")
     
@@ -828,12 +834,14 @@ def start_web_app(app_instance, port=0):
     web_folder = get_resource_path('web')
     eel.init(
         web_folder,
-        # 这里只影响“Python 是否能在前端 JS 里找 eel.expose 出来的函数”，
+        # 这里只影响“Python 能否在前端 JS 里找到 eel.expose 出来的函数”，
         # 服务静态文件不受影响。之前把 .js/.css/.json 全列上，eel 会用
         # pyparsing 把 pixi.min.js 这种几百 KB 的压缩文件整个解析一遍，
-        # 白白多花 2~3 秒。本项目没有 Python 调 JS 的用法，留 .html 足够。
+        # 白白多花 2~3 秒，所以只留 .html。
+        # 代价是前端写在 js/ 里的回调不会被自动发现——下面手动登记一份。
         allowed_extensions=['.html'],
     )
+    _register_js_callbacks()
     boot.log("eel.init 完成")
 
     # ⭐ 动态注入版本号到 index.html
@@ -1031,6 +1039,36 @@ def _pick_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
+
+
+# ---------------------------------------------------------------- 前端回调
+
+#: 前端用 eel.expose 暴露给 Python 调用的函数（web/js/*.js）。
+#: eel.init 只解析 .html，所以这张表要跟着前端一起维护。
+JS_CALLBACKS = (
+    'updateAvatarDisplay',
+    'updateMood',
+    'updateAffection',
+    'updatePADValues',
+    'triggerAvatarEffect',
+    'startAvatarTalking',
+    'receiveAIResponse',
+    'applyThemeFromPython',
+)
+
+
+def _register_js_callbacks():
+    """把前端回调补进 eel 的名单。
+
+    eel.init 只解析 .html，js/ 里 eel.expose 出来的函数它看不到。
+    这一步把它们塞回 _js_functions：页面连上时 eel 会给这些函数装上真正的
+    发送实现（_import_js_function），而不是 init 时那个只入队不发送的 mock。
+    """
+    try:
+        merged = list(dict.fromkeys(list(getattr(eel, '_js_functions', []) or []) + list(JS_CALLBACKS)))
+        eel._js_functions = merged
+    except Exception as exc:
+        print("⚠️ 注册前端回调失败: %s" % exc)
 
 
 # ---------------------------------------------------------------- 启动画面

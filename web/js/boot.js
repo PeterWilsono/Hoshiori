@@ -5,6 +5,19 @@
 (function () {
     'use strict';
 
+    // 兜住启动期间的脚本错误：出问题时能从外部读到，而不是只在 F12 里
+    window.__bootErrors = [];
+    window.addEventListener('error', function (e) {
+        try {
+            window.__bootErrors.push((e.message || 'error') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0));
+        } catch (err) { }
+    }, true);
+    window.addEventListener('unhandledrejection', function (e) {
+        try {
+            window.__bootErrors.push('promise: ' + ((e.reason && e.reason.message) || e.reason));
+        } catch (err) { }
+    });
+
     var el = document.getElementById('bootScreen');
     if (!el) return;
 
