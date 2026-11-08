@@ -1120,6 +1120,26 @@
     border-color: var(--line-strong);
 }
 
+/* 声音下拉 + 试听按钮并排 */
+.voice-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.voice-row .form-select {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+}
+
+.voice-row .btn {
+    flex: 0 0 auto;
+    padding-left: 16px;
+    padding-right: 16px;
+    font-size: 12.5px;
+}
+
 .form-input:focus,
 .form-textarea:focus,
 .form-select:focus {

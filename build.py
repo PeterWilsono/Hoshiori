@@ -26,7 +26,7 @@ import zipfile
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
 BUILD = os.path.join(ROOT, "build")
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 APP = "Hoshiori"
 
 COMMON_ARGS = [
@@ -42,6 +42,11 @@ COMMON_ARGS = [
     "--hidden-import", "gevent",
     "--hidden-import", "geventwebsocket",
     "--hidden-import", "webview.platforms.winforms",
+    # 系统语音（SAPI）走 pywin32 的 COM，是 import 在函数里的，静态分析看不到
+    "--hidden-import", "win32com",
+    "--hidden-import", "win32com.client",
+    "--hidden-import", "pythoncom",
+    "--hidden-import", "pywintypes",
     # pywebview 在 Windows 上依赖 pythonnet / clr_loader 原生库
     "--collect-all", "webview",
     "--collect-all", "pythonnet",

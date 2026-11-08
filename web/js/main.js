@@ -616,32 +616,43 @@ const Live2DManager = {
         } catch (e) { }
     },
 
+    /**
+     * 开始说话的口型动画
+     * duration 是这一句音频的实际长度（秒），由后端量出来传过来。
+     */
     startTalking(duration) {
         if (!this.model) return;
-        const core = this.model.internalModel && this.model.internalModel.coreModel;
-        if (!core) return;
-
-        clearInterval(this.talkTimer);
         clearTimeout(this.talkStopTimer);
+        clearInterval(this.talkTimer);
+        this.talkTimer = null;
 
-        let phase = 0;
-        this.talkTimer = setInterval(() => {
-            phase += 0.55;
-            const open = 0.18 + Math.abs(Math.sin(phase)) * 0.62;
-            try {
-                core.setParameterValueById('ParamMouthOpenY', open);
-                core.setParameterValueById('ParamMouthForm', 0.75);
-            } catch (e) { }
-        }, 90);
+        if (this.rig) {
+            // 交给情绪骨架逐帧驱动：它本来就在写 MouthOpen / MouthForm，
+            // 两边同时写会互相打架，嘴会抽
+            this.rig.setTalking(true);
+        } else {
+            const core = this.model.internalModel && this.model.internalModel.coreModel;
+            if (!core) return;
+            let phase = 0;
+            this.talkTimer = setInterval(() => {
+                phase += 0.55;
+                try {
+                    core.setParameterValueById('ParamMouthOpenY', 0.18 + Math.abs(Math.sin(phase)) * 0.62);
+                    core.setParameterValueById('ParamMouthForm', 0.75);
+                } catch (e) { }
+            }, 90);
+        }
 
-        this.talkStopTimer = setTimeout(() => {
-            clearInterval(this.talkTimer);
-            this.talkTimer = null;
-            try {
-                core.setParameterValueById('ParamMouthOpenY', 0);
-                core.setParameterValueById('ParamMouthForm', 0);
-            } catch (e) { }
-        }, duration || 3000);
+        // 兜底：万一"说完了"的通知没到，也不能一直张着嘴
+        const ms = Math.max(800, (duration || 3) * 1000);
+        this.talkStopTimer = setTimeout(() => this.stopTalking(), ms * 1.45);
+    },
+
+    stopTalking() {
+        clearTimeout(this.talkStopTimer);
+        clearInterval(this.talkTimer);
+        this.talkTimer = null;
+        if (this.rig) this.rig.setTalking(false);
     },
 
     updateByPAD(pad) {
@@ -987,7 +998,7 @@ async function openSettings() {
                 <div class="switch-row">
                     <div>
                         <div class="switch-label">语音朗读</div>
-                        <div class="switch-desc">用 Edge-TTS 把她的回答读出来</div>
+                        <div class="switch-desc">把她的回答读出来，边合成边播，不用等整段</div>
                     </div>
                     <label class="switch">
                         <input type="checkbox" id="settingVoiceSwitch" ${appState.voiceEnabled ? 'checked' : ''}
@@ -1010,10 +1021,13 @@ async function openSettings() {
 
                 <div class="form-group" style="margin-top: 18px;">
                     <label class="form-label">声音</label>
-                    <select class="form-select" id="settingTTSVoice" onchange="changeTTSVoice(this.value)">
-                        ${voiceOptions}
-                    </select>
-                    <p class="form-hint">当前声音会用于所有回答的朗读。</p>
+                    <div class="voice-row">
+                        <select class="form-select" id="settingTTSVoice" onchange="changeTTSVoice(this.value)">
+                            ${voiceOptions}
+                        </select>
+                        <button class="btn btn-ghost" type="button" onclick="previewTTSVoice()">试听</button>
+                    </div>
+                    <p class="form-hint">在线音色更自然，需要网络；系统音色离线可用，几乎瞬间出声。</p>
                 </div>
             </div>
 
@@ -1264,6 +1278,13 @@ function startAvatarTalking(duration) {
     }
 }
 
+eel.expose(stopAvatarTalking);
+function stopAvatarTalking() {
+    if (Live2DManager.isInitialized) {
+        Live2DManager.stopTalking();
+    }
+}
+
 // Live2D 模型选择
 function openModelSelector() {
     const models = Live2DManager.getAvailableModels();
@@ -1455,6 +1476,24 @@ window.clearFile = () => chatManager.clearFile ? chatManager.clearFile() : null;
 window.openThemeSelector = () => themeManager.openSelector();
 window.openModelSelector = openModelSelector;
 window.selectLive2DModel = selectLive2DModel;
+async function previewTTSVoice() {
+    try {
+        if (!appState.voiceEnabled) {
+            // 试听时临时开一下，试听完再关回去
+            await eel.preview_tts_voice(null)();
+        } else {
+            const current = document.getElementById('settingTTSVoice');
+            await eel.preview_tts_voice(current ? current.value : null)();
+        }
+        showNotification('正在试听', 'info');
+    } catch (e) {
+        console.error('试听失败:', e);
+        showNotification('试听失败', 'error');
+    }
+}
+
+window.previewTTSVoice = previewTTSVoice;
+
 window.changeTTSVoice = changeTTSVoice;
 window.openDataDir = openDataDir;
 window.chooseDataDir = chooseDataDir;

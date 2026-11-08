@@ -90,14 +90,18 @@ class AIChatAppWeb:
         # API处理器
         self.api_handler = None
         
-        # TTS管理器
-        self.tts_manager = TTSManager()
+        # TTS管理器（把配置传进去，语音选择能记住）
+        self.tts_manager = TTSManager(self.config_manager)
+        # 说话时让立绘的嘴跟着动
+        self.tts_manager.on_talk = self._on_tts_talk
+        self.tts_manager.on_stop = self._on_tts_stop
         
         # 立绘图片路径
         self.avatar_images = self.load_avatar_images()
         
         # 状态
-        self.voice_enabled = self.tts_manager.is_enabled
+        self.voice_enabled = bool(getattr(self.config_manager, 'tts_enabled', False))
+        self.tts_manager.is_enabled = self.voice_enabled
         self.avatar_visible = self.config_manager.show_avatar
         self.current_mood = 'neutral'  # 当前情绪状态
         
@@ -114,7 +118,21 @@ class AIChatAppWeb:
         """切换语音开关"""
         self.voice_enabled = not self.voice_enabled
         self.tts_manager.set_enabled(self.voice_enabled)
+        try:
+            self.config_manager.tts_enabled = self.voice_enabled
+            self.config_manager.save_config()
+        except Exception:
+            pass
         return self.voice_enabled
+
+    # ---------------- 语音 → 口型 ----------------
+    def _on_tts_talk(self, seconds):
+        if self.web_bridge:
+            self.web_bridge.start_avatar_talking(seconds)
+
+    def _on_tts_stop(self):
+        if self.web_bridge:
+            self.web_bridge.stop_avatar_talking()
     def reload_avatars(self):
         """重新加载立绘"""
         print("🔄 刷新立绘列表...")

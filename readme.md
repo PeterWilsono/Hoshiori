@@ -16,17 +16,17 @@
 
 ## ⬇️ 下载安装（Windows）
 
-去 [Releases](https://github.com/PeterWilsono/Hoshiori/releases/latest) 下载 **`Hoshiori-Setup-1.3.0.exe`**，双击安装。
+去 [Releases](https://github.com/PeterWilsono/Hoshiori/releases/latest) 下载 **`Hoshiori-Setup-1.4.0.exe`**，双击安装。
 
 - 安装到哪里由你决定：默认会挑一块**非系统盘**（比如 `D:\Hoshiori`），也可以点「浏览…」换地方
 - 装完桌面和开始菜单会有快捷方式，Windows「应用和功能」里能直接卸载
 - 卸载只删程序，你的对话和设置留在数据目录里，不会丢
-- 不想装也行：同一页还有 `Hoshiori-1.3.0-win64.zip`（解压即用）和 `Hoshiori.exe`（单文件便携）
+- 不想装也行：同一页还有 `Hoshiori-1.4.0-win64.zip`（解压即用）和 `Hoshiori.exe`（单文件便携）
 
 | 文件 | 适合谁 | 启动速度 |
 | --- | --- | --- |
-| **`Hoshiori-Setup-1.3.0.exe`**（推荐） | 想要快捷方式、想从系统里干净卸载 | 约 5 秒 |
-| `Hoshiori-1.3.0-win64.zip` | 不想装、解压就用 | 约 5 秒 |
+| **`Hoshiori-Setup-1.4.0.exe`**（推荐） | 想要快捷方式、想从系统里干净卸载 | 约 5 秒 |
+| `Hoshiori-1.4.0-win64.zip` | 不想装、解压就用 | 约 5 秒 |
 | `Hoshiori.exe` | 只带一个文件到处跑 | 每次启动要先解压，约 25 秒 |
 
 关于启动速度：目录版（安装包/zip）不用解压，双击到能聊天大约 5 秒；
@@ -95,9 +95,11 @@
 - 根据对话内容自动调整表情
 
 #### 5. 语音系统（可选）
-- Edge-TTS文字转语音
-- 多种语音可选
-- 情绪驱动的语音表达
+- **逐句流式朗读**：切开句子边合成边播，第一声通常在 1 秒内（旧版要等整段合成，3~5 秒）
+- **三个引擎自动切换**：在线女声（自然，需网络）→ 备用在线线路 → Windows 系统语音（离线）
+- 在线部分用的是免费接口，不需要申请 Key；断网也能说话
+- **嘴型跟着声音动**：按每句音频的真实时长驱动，不是机械的循环动画
+- 可切换音色，设置里有「试听」
 
 ### 🎨 界面特性
 
@@ -448,7 +450,9 @@ pip install -r requirements.txt
 - [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) - 现代化的Tkinter UI库
 - [Pillow](https://python-pillow.org/) - Python图像处理库
 - [Live2D](https://www.live2d.com/) - 2D模型动画技术
-- [Edge-TTS](https://github.com/rany2/edge-tts) - 微软Edge文字转语音
+- 百度翻译 / 百科的免费语音接口 - 在线中文语音
+- Windows SAPI（pywin32）- 离线语音合成
+- [Edge-TTS](https://github.com/rany2/edge-tts) - 保留为可选（微软 2026-10 之后接口基本 403）
 
 ### 灵感来源
 

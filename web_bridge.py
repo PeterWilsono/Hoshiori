@@ -492,24 +492,57 @@ class WebBridge:
             except Exception as e:
                 print(f"获取TTS声音错误: {e}")
                 return []
-        
+
         @eel.expose
         def set_tts_voice(voice_id):
             """设置TTS声音"""
             try:
-                self.app.tts_manager.set_voice(voice_id)
-                return True
+                return bool(self.app.tts_manager.set_voice(voice_id))
             except Exception as e:
                 print(f"设置TTS声音错误: {e}")
                 return False
-        
+
         @eel.expose
         def get_current_tts_voice():
             """获取当前TTS声音"""
             try:
-                return self.app.tts_manager.edge_voice
-            except:
-                return "zh-CN-XiaoyiNeural"
+                return self.app.tts_manager.voice_id
+            except Exception:
+                return ""
+
+        @eel.expose
+        def preview_tts_voice(voice_id=None):
+            """试听：即使语音开关没开也念一句，让用户听听差别"""
+            try:
+                mgr = self.app.tts_manager
+                if voice_id:
+                    mgr.set_voice(voice_id)
+                mgr.prewarm()
+                was = mgr.is_enabled
+                mgr.is_enabled = True
+                mgr.speak('你好呀，我是星织。这个声音，你听着还习惯吗？')
+                # speak() 已经在同步阶段检查过开关，这里立刻还原，
+                # 免得「试听」变成顺手把语音打开了
+                mgr.is_enabled = was
+                return True
+            except Exception as e:
+                print(f"试听失败: {e}")
+                return False
+
+        @eel.expose
+        def get_tts_status():
+            """当前语音状态（给设置页显示用）"""
+            try:
+                mgr = self.app.tts_manager
+                return {
+                    'enabled': bool(self.app.voice_enabled),
+                    'voice_id': mgr.voice_id,
+                    'engine': mgr.get_engine_label(),
+                    'online_ok': mgr._baidu_ok is not False,
+                }
+            except Exception as e:
+                print(f"获取语音状态错误: {e}")
+                return {'enabled': False, 'voice_id': '', 'engine': '', 'online_ok': False}
         
         # ===== 模型模式相关 =====
         @eel.expose
@@ -810,6 +843,10 @@ class WebBridge:
     def start_avatar_talking(self, duration):
         """开始说话动画"""
         self.send_to_web('startAvatarTalking', duration)
+
+    def stop_avatar_talking(self):
+        """停止说话动画（一句念完就闭嘴）"""
+        self.send_to_web('stopAvatarTalking')
     
     def update_affection(self, value):
         """更新好感度"""
@@ -1052,6 +1089,7 @@ JS_CALLBACKS = (
     'updatePADValues',
     'triggerAvatarEffect',
     'startAvatarTalking',
+    'stopAvatarTalking',
     'receiveAIResponse',
     'applyThemeFromPython',
 )

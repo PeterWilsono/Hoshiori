@@ -1,7 +1,9 @@
-# TTS语音功能额外依赖
-pygame>=2.5.0
-requests>=2.28.0
+# 语音功能依赖
+requests>=2.28.0     # 在线语音（百度翻译 / 百科接口）
+pywin32>=306         # Windows 系统语音（SAPI），离线可用
 
 # 说明：
-# pygame - 用于音频播放
-# requests - 用于调用GPT-SoVITS API（已有）
+# 播放不再依赖 pygame —— pygame 光 import 就要 4.3 秒，播放改用
+# winsound（wav）和 winmm 的 MCI（mp3），都是系统自带。
+# edge-tts 可选：微软在 2026-10 之后对它的接口加了校验，多数情况下 403，
+# 装了也只在特定网络下能用。

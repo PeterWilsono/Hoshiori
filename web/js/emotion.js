@@ -149,6 +149,9 @@ var EmotionRig = (function () {
         this.writes = [];
         this.applied = {};      // 上一帧我往这个参数里加了多少（用来扣掉自己，避免累加漂移）
         this.clock = 0;
+        this.talking = false;   // 是否正在说话（嘴型交给这里，别的代码别再抢）
+        this.talkPhase = 0;
+        this.talkLevel = 0;
         this.lastAt = 0;
         this.born = performance.now();
 
@@ -238,6 +241,16 @@ var EmotionRig = (function () {
         this.bob = cfg.bob || null;
     };
 
+    /**
+     * 说话开关。开启后嘴型由这里逐帧驱动，情绪只负责嘴角的弧度。
+     * 之所以要接管：如果外面用 setInterval 直接写 ParamMouthOpenY，
+     * 会和这里的"扣掉自己上一帧"记账打架，嘴会抽。
+     */
+    Rig.prototype.setTalking = function (on) {
+        this.talking = !!on;
+        if (on) this.talkPhase = 0;
+    };
+
     /** 只调浓度，不换情绪（PAD 用） */
     Rig.prototype.setStrength = function (strength) {
         if (typeof strength !== 'number') return;
@@ -301,6 +314,17 @@ var EmotionRig = (function () {
         });
         this.eyeCur += (this.eyeTarget - this.eyeCur) * k;
 
+        // 说话时嘴的开合：两个不同频率叠在一起，比纯正弦像人在讲话
+        if (this.talking) {
+            this.talkPhase += dt * 11.5;
+            var a1 = Math.abs(Math.sin(this.talkPhase));
+            var a2 = Math.abs(Math.sin(this.talkPhase * 0.43 + 1.7));
+            var target = 0.16 + (a1 * 0.72 + a2 * 0.28) * 0.62;
+            this.talkLevel += (target - this.talkLevel) * 0.45;
+        } else if (this.talkLevel > 0.001) {
+            this.talkLevel *= 0.72;           // 收尾时把嘴合上，别硬切
+        }
+
         // 轻微的身体晃动，让"高兴"真的有起伏
         var bob = 0;
         if (this.bob) {
@@ -320,6 +344,13 @@ var EmotionRig = (function () {
 
             var offset = this.cur[w.key] || 0;
             if (w.key === 'angleZ' || w.key === 'bodyZ') offset += bob;
+            if (w.key === 'mouthOpen' && this.talkLevel > 0.001) {
+                offset = Math.max(offset, this.talkLevel);
+            }
+            if (w.key === 'mouthForm' && this.talkLevel > 0.001) {
+                // 说话时嘴角别太夸张，不然像在咧嘴
+                offset = offset * 0.6 + 0.18 * this.talkLevel;
+            }
 
             // 关键：参数每帧都被动作重置时，读到的是干净值；
             // 没被重置时读到的是"上一帧我写进去的值"，必须先把自己的份额扣掉，
