@@ -29,13 +29,33 @@ class TTSManager:
         # zh-CN-XiaoyiNeural - 小艺（温柔）
         # zh-CN-YunxiNeural - 云希（男声）
         # zh-CN-YunyangNeural - 云扬（新闻播报）
-        
-        # 初始化pygame
-        self._init_pygame()
-        
-        # 检测可用引擎
-        self._detect_engines()
-    
+
+        # ⭐ 延迟初始化：pygame 打开音频设备 + 探测引擎要 5 秒左右，
+        # 而绝大多数人打开软件时并不说话。所以先什么都不做，
+        # 等真的要发声（或后台预热）时再初始化。
+        self.pygame = None
+        self.available_engines = []
+        self._ready = False
+        self._ready_lock = threading.Lock()
+
+    def ensure_ready(self):
+        """把音频设备和 TTS 引擎准备好（幂等，可多线程调用）"""
+        if self._ready:
+            return self._ready
+        with self._ready_lock:
+            if self._ready:
+                return True
+            self._init_pygame()
+            self._detect_engines()
+            self._ready = True
+        return True
+
+    def prewarm(self):
+        """后台预热，用户点开语音开关时就不用等"""
+        if self._ready:
+            return
+        threading.Thread(target=self.ensure_ready, daemon=True).start()
+
     def _init_pygame(self):
         """初始化pygame音频"""
         try:
@@ -77,6 +97,8 @@ class TTSManager:
 
     def set_enabled(self, enabled: bool):
         """设置语音开关"""
+        if enabled:
+            self.ensure_ready()
         self.is_enabled = enabled
         print(f"🔊 语音{'已开启' if enabled else '已关闭'} (引擎: {self.engine_name})")
         if not enabled:
@@ -84,6 +106,7 @@ class TTSManager:
     
     def set_engine(self, engine_name: str):
         """切换TTS引擎"""
+        self.ensure_ready()
         if engine_name in self.available_engines:
             self.engine_name = engine_name
             print(f"✓ 已切换到 {engine_name} 引擎")
@@ -118,7 +141,10 @@ class TTSManager:
     
     def speak(self, text: str):
         """对外接口：让AI说话"""
-        if not self.is_enabled or not self.available_engines:
+        if not self.is_enabled:
+            return
+        self.ensure_ready()
+        if not self.available_engines:
             return
         
         clean_text = self.clean_text(text)

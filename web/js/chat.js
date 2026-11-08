@@ -57,10 +57,10 @@ function initChat() {
         }
     });
 
-    // 加载历史消息
-    loadCurrentConversation();
+    // 加载历史消息（返回 Promise，好让启动画面等到消息真的画出来）
     updateWelcome();
     loadResumeHint();
+    return loadCurrentConversation();
 }
 
 /**

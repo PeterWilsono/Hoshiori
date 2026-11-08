@@ -2,6 +2,9 @@
 import json
 import os
 
+import app_paths
+
+
 class ConfigManager:
     """配置管理器 - 升级版（支持本地/在线模型切换）"""
     
@@ -40,9 +43,10 @@ class ConfigManager:
         }
     }
     
-    def __init__(self, save_dir="baocun"):
-        self.save_dir = save_dir
-        self.config_path = os.path.join(save_dir, "config.json")
+    def __init__(self, save_dir=None):
+        # 数据目录的统一策略见 app_paths.py（默认挑非系统盘，用户可改）
+        self.save_dir = save_dir or app_paths.data_dir()
+        self.config_path = os.path.join(self.save_dir, "config.json")
         
         # ⭐ 新增：模型运行模式
         self.model_mode = "online"  # "local" 或 "online"

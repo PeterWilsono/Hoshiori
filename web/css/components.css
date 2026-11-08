@@ -987,6 +987,42 @@
     display: none;
 }
 
+/* 存放大字路径：等宽字 + 可换行，长路径不会把面板撑破 */
+.path-box {
+    margin-top: 2px;
+    padding: 11px 13px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    background: var(--fill-0);
+    transition: border-color var(--dur-1) var(--ease-soft);
+}
+
+.path-box:hover {
+    border-color: var(--line-strong);
+}
+
+.path-box__text {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.62;
+    color: var(--ink-2);
+    word-break: break-all;
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+.path-ellipsis {
+    max-width: 62%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    direction: rtl;
+    text-align: left;
+}
+
 .meta-row {
     display: flex;
     align-items: baseline;

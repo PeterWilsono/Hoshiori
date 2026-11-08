@@ -183,18 +183,44 @@ const Live2DManager = {
     },
 
     async waitSDK() {
-        if (typeof PIXI === 'undefined') {
-            console.error('PIXI 未加载，Live2D 将降级');
-            return false;
-        }
-        for (let i = 0; i < 100; i++) {
-            if (typeof PIXI !== 'undefined' && PIXI.live2d && PIXI.live2d.Live2DModel) {
-                return true;
-            }
+        const ready = () => typeof PIXI !== 'undefined' && PIXI.live2d && PIXI.live2d.Live2DModel;
+
+        // 本地文件是 defer 加载的，正常情况下这里已经是好的；
+        // 万一本地缺文件（有人手动删了 lib），2 秒后换 CDN 再等。
+        for (let i = 0; i < 70 && !ready(); i++) {
+            if (i === 20) this.injectRuntimeCDN();
             await new Promise(r => setTimeout(r, 100));
         }
-        console.error('Live2D SDK 加载超时');
-        return false;
+
+        if (!ready()) {
+            console.error('Live2D 运行时加载超时，降级为静态立绘');
+            return false;
+        }
+        return true;
+    },
+
+    /**
+     * 本地运行时缺失时的兜底：从 CDN 补回来（只补一次）
+     */
+    injectRuntimeCDN() {
+        if (this._cdnInjected) return;
+        this._cdnInjected = true;
+        console.warn('本地 Live2D 运行时不可用，尝试 CDN');
+
+        const sources = [
+            'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js',
+            'https://unpkg.com/pixi.js@6.5.10/dist/browser/pixi.min.js',
+            'https://unpkg.com/pixi-live2d-display@0.4.0/dist/cubism4.min.js'
+        ];
+
+        sources.forEach((src, index) => {
+            setTimeout(() => {
+                const tag = document.createElement('script');
+                tag.src = src;
+                tag.async = false;
+                document.body.appendChild(tag);
+            }, index * 260);
+        });
     },
 
     async initPixi() {
@@ -678,13 +704,24 @@ const MOOD_WORDS = {
 
 // 应用初始化
 async function initApp() {
+    const boot = (pct, label) => {
+        if (window.BootScreen) window.BootScreen.step(pct, label);
+    };
+
     try {
+        boot(16, '正在翻开存稿…');
         await themeManager.init();
-        chatManager.init();
+
+        await chatManager.init();
+        boot(38, '正在铺开桌面…');
+
         await loadAppState();
+        boot(58, '正在整理她的房间…');
+
         await Live2DManager.init();
         if (!appState.avatarVisible) Live2DManager.suspend();
         syncChamberModelLabel();
+        boot(88, '正在让她醒过来…');
 
         // 她的视线跟着整块屏幕上的光标走，而不只是立绘区域内
         document.addEventListener('pointermove', (e) => {
@@ -697,6 +734,9 @@ async function initApp() {
     } catch (e) {
         console.error('初始化失败:', e);
         showNotification('应用初始化失败', 'error');
+    } finally {
+        // 无论成功与否都要收掉启动画面，不能让用户对着进度条发呆
+        if (window.BootScreen) window.BootScreen.finish();
     }
 }
 
@@ -855,6 +895,13 @@ async function openSettings() {
         const currentVoice = await eel.get_current_tts_voice()();
         const apiPresets = await eel.get_api_presets()();
 
+        let paths = {};
+        try {
+            paths = (await eel.get_app_paths()()) || {};
+        } catch (err) {
+            console.warn('读取路径信息失败:', err);
+        }
+
         let voiceOptions = '';
         for (const voice of ttsVoices) {
             const selected = voice.id === currentVoice ? 'selected' : '';
@@ -896,6 +943,8 @@ async function openSettings() {
                         onclick="switchSettingsTab('daily')">日常</button>
                 <button class="settings-tab" data-tab="model" role="tab"
                         onclick="switchSettingsTab('model')">模型</button>
+                <button class="settings-tab" data-tab="storage" role="tab"
+                        onclick="switchSettingsTab('storage')">存储</button>
                 <button class="settings-tab" data-tab="more" role="tab"
                         onclick="switchSettingsTab('more')">更多</button>
             </div>
@@ -1002,6 +1051,25 @@ async function openSettings() {
                 ` : ''}
             </div>
 
+            <div class="settings-panel" data-panel="storage" hidden>
+                <div class="form-group">
+                    <label class="form-label">数据保存位置</label>
+                    <div class="path-box">
+                        <span class="path-box__text" id="settingDataDir"
+                            title="${paths.data_dir || ''}">${paths.data_dir || '未知'}</span>
+                    </div>
+                    <p class="form-hint">对话、配置与日志都放在这里，目前约占 ${paths.data_size || 0} MB。默认会挑一块非系统盘，你也可以换到自己喜欢的地方。</p>
+                </div>
+                <div class="settings-grid">
+                    <button class="btn btn-ghost" onclick="openDataDir()">打开文件夹</button>
+                    <button class="btn btn-ghost" onclick="chooseDataDir()">更改位置…</button>
+                </div>
+                <div class="meta-row">
+                    <span class="label">程序位置</span>
+                    <span class="meta-row__value path-ellipsis" title="${paths.app_dir || ''}">${paths.app_dir || '—'}</span>
+                </div>
+            </div>
+
             <div class="settings-panel" data-panel="more" hidden>
                 <div class="settings-grid">
                     <button class="btn btn-ghost" onclick="editRole(); closeModal(this);">角色设定</button>
@@ -1013,7 +1081,7 @@ async function openSettings() {
                 </div>
                 <div class="meta-row">
                     <span class="label">数据</span>
-                    <span class="meta-row__value">全部保存在本机 baocun 目录</span>
+                    <span class="meta-row__value">全部留在本机，不会上传</span>
                 </div>
             </div>
         `;
@@ -1211,6 +1279,68 @@ async function selectLive2DModel(modelId) {
     }
 }
 
+/**
+ * 在资源管理器里打开数据目录
+ */
+async function openDataDir() {
+    try {
+        const ok = await eel.open_data_dir()();
+        if (!ok) showNotification('打不开这个文件夹', 'error');
+    } catch (err) {
+        showNotification('打不开这个文件夹', 'error');
+    }
+}
+
+/**
+ * 换一个保存位置：先选目录，再确认，最后问要不要立刻重启
+ */
+async function chooseDataDir() {
+    let dir = '';
+    try {
+        dir = await eel.pick_data_dir()();
+    } catch (err) {
+        showNotification('选择目录失败', 'error');
+        return;
+    }
+    if (!dir) return;
+
+    const ok = await confirmDialog({
+        title: '要换个地方安家吗？',
+        text: `之后的对话、配置和日志都会存到 ${dir}。现有的存档我会一起搬过去，不会丢。`,
+        note: '换位置需要重启一次才会完全生效。',
+        confirmText: '搬过去',
+        cancelText: '算了'
+    });
+    if (!ok) return;
+
+    let result = null;
+    try {
+        result = await eel.change_data_dir(dir)();
+    } catch (err) {
+        showNotification('切换失败', 'error');
+        return;
+    }
+
+    if (!result || !result.success) {
+        showNotification((result && result.message) || '切换失败', 'error', 3200);
+        return;
+    }
+
+    showNotification(result.message || '数据目录已更新', 'success', 2600);
+
+    const restart = await confirmDialog({
+        title: '现在重开一次？',
+        text: '新的位置要重启之后才完全生效，重开大概几秒钟。',
+        note: '不重开也可以继续聊，下次打开时就在新位置了。',
+        confirmText: '重开',
+        cancelText: '稍后'
+    });
+    if (restart) {
+        document.body.classList.add('is-quitting');
+        try { await eel.restart_app()(); } catch (err) { }
+    }
+}
+
 async function changeTTSVoice(voiceId) {
     const success = await eel.set_tts_voice(voiceId)();
     if (success) {
@@ -1292,4 +1422,6 @@ window.openThemeSelector = () => themeManager.openSelector();
 window.openModelSelector = openModelSelector;
 window.selectLive2DModel = selectLive2DModel;
 window.changeTTSVoice = changeTTSVoice;
+window.openDataDir = openDataDir;
+window.chooseDataDir = chooseDataDir;
 window.switchSettingsTab = switchSettingsTab;

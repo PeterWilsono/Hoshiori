@@ -4,22 +4,30 @@
 使用Eel框架实现现代化Web界面
 """
 import sys
+import os
+import time
+
+import boot
+
+#: 兼容旧代码里对 boot_ms / boot_log 的引用
+boot_ms = boot.ms
+boot_log = boot.log
+
 
 # 打包成无控制台程序后 sys.stdout / sys.stderr 是 None，
 # 任何一次 print 都会抛 AttributeError 直接把进程带走。
 # 所以要在其它模块导入之前先把这两个流接上。
 def _ensure_std_streams():
+    boot_log("解释器就绪")
+
     if sys.stdout is not None and sys.stderr is not None:
         return
 
-    base = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) \
-        else os.path.dirname(os.path.abspath(__file__))
-    log_dir = os.path.join(base, 'baocun')
+    import app_paths
 
     stream = None
     try:
-        os.makedirs(log_dir, exist_ok=True)
-        log_path = os.path.join(log_dir, 'app.log')
+        log_path = app_paths.log_file()
         if os.path.exists(log_path) and os.path.getsize(log_path) > 2 * 1024 * 1024:
             os.remove(log_path)
         stream = open(log_path, 'a', encoding='utf-8', buffering=1)
@@ -35,10 +43,11 @@ def _ensure_std_streams():
         sys.stderr = stream
 
 
-import os
 import threading
 import re
 import json
+
+import app_paths
 
 _ensure_std_streams()
 
@@ -49,6 +58,8 @@ from api_handler import APIHandler
 from theme_system import ThemeManager
 from web_bridge import start_web_app
 
+boot_log("业务模块加载完成")
+
 
 class AIChatAppWeb:
     """星织AI助手 - Web版本"""
@@ -57,8 +68,14 @@ class AIChatAppWeb:
         """初始化应用"""
         print("🚀 初始化星织AI助手...")
         
+        # ⭐ 数据目录：非系统盘优先，用户可在设置里随时改
+        self.data_dir = app_paths.data_dir()
+        print("📁 数据目录: %s" % self.data_dir)
+        boot_log("数据目录 " + self.data_dir)
+
         # 配置管理器
-        self.config_manager = ConfigManager()
+        self.config_manager = ConfigManager(save_dir=self.data_dir)
+        boot_log("配置已载入")
         
         # 主题管理器
         self.theme_manager = ThemeManager(save_dir=self.config_manager.save_dir)
@@ -579,10 +596,13 @@ def main():
     print("=" * 50)
     print("🌟 星织 - 智能对话助手")
     print("=" * 50)
-    
+
+    boot_log("进入 main()")
+
     # 创建应用实例
     app = AIChatAppWeb()
-    
+    boot_log("应用对象就绪")
+
     # 启动Web应用（使用随机端口避免冲突）
     start_web_app(app, port=0)
 

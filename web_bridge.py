@@ -7,15 +7,16 @@ import eel
 import sys
 import os
 import base64
-from tkinter import filedialog
-import tkinter as tk
 import re
 import socket
+import threading
 import traceback
 import time
 import hashlib
 from datetime import datetime
 
+import app_paths
+import boot
 import window_shell
 
 
@@ -66,6 +67,21 @@ def get_resource_path(relative_path):
         return os.path.join(sys._MEIPASS, relative_path)
     # 开发环境
     return os.path.join(os.path.abspath("."), relative_path)
+
+
+def _dir_size(path):
+    """目录占用（MB），设置面板里给用户一个“占了多少地方”的概念。"""
+    total = 0
+    try:
+        for root, _dirs, files in os.walk(path):
+            for name in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, name))
+                except Exception:
+                    continue
+    except Exception:
+        return 0
+    return round(total / 1024.0 / 1024.0, 1)
 
 
 def get_file_hash(filepath):
@@ -349,6 +365,114 @@ class WebBridge:
                     pass
             return False
         
+        @eel.expose
+        def app_ready_from_web():
+            """前端画出第一帧了：把启动图撤掉，用户可以开始用了"""
+            boot.log("前端就绪")
+            close_splash("前端就绪")
+            # 界面可以用了，再在后台把发请求要用的库热起来
+            try:
+                from api_handler import prewarm_http
+                prewarm_http()
+            except Exception:
+                pass
+            # 语音的音频设备也放到后台开，免得用户点开语音时卡一下
+            try:
+                self.app.tts_manager.prewarm()
+            except Exception:
+                pass
+            return True
+
+        # ===== 存储位置 =====
+        @eel.expose
+        def get_app_paths():
+            """当前程序位置 / 数据位置，给设置面板显示"""
+            try:
+                info = app_paths.describe()
+                info["data_size"] = _dir_size(info["data_dir"])
+                return info
+            except Exception as e:
+                print(f"读取路径信息失败: {e}")
+                return {}
+
+        @eel.expose
+        def open_data_dir():
+            """在资源管理器里打开数据目录"""
+            return app_paths.open_path(app_paths.data_dir())
+
+        @eel.expose
+        def pick_data_dir():
+            """弹系统文件夹选择框，返回用户选的路径（取消返回空串）"""
+            try:
+                import tkinter as tk
+                from tkinter import filedialog
+
+                root = tk.Tk()
+                root.withdraw()
+                root.wm_attributes('-topmost', 1)
+                root.update()
+                path = filedialog.askdirectory(
+                    parent=root,
+                    title="选择星织保存数据的位置",
+                    mustexist=False,
+                    initialdir=os.path.dirname(app_paths.data_dir()) or app_paths.data_dir(),
+                )
+                root.destroy()
+                return path or ""
+            except Exception as e:
+                print(f"选择目录失败: {e}")
+                return ""
+
+        @eel.expose
+        def change_data_dir(new_dir):
+            """切换数据目录（会把现有的对话一起搬过去），需要重启才完全生效"""
+            try:
+                old = app_paths.data_dir()
+                ok, message = app_paths.set_data_dir(new_dir, migrate=True)
+                print(("📁 " if ok else "⚠️ ") + message)
+                return {"success": ok, "message": message, "old": old,
+                        "current": app_paths.data_dir()}
+            except Exception as e:
+                print(f"切换数据目录失败: {e}")
+                return {"success": False, "message": str(e)}
+
+        @eel.expose
+        def reset_data_dir():
+            """恢复自动选址"""
+            try:
+                app_paths.reset_data_dir()
+                return {"success": True, "current": app_paths.resolve_data_dir()}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+
+        @eel.expose
+        def restart_app():
+            """重启自己：先把当前对话落盘，再拉起一个新进程"""
+            try:
+                self.app.conversation_manager.save_conversations()
+            except Exception:
+                pass
+            try:
+                self.app.config_manager.save_config()
+            except Exception:
+                pass
+
+            def _restart():
+                try:
+                    if getattr(sys, 'frozen', False):
+                        os.startfile(sys.executable)  # noqa: S606
+                    else:
+                        import subprocess
+                        subprocess.Popen([sys.executable, os.path.join(app_paths.app_root(), 'main.py')])
+                except Exception as exc:
+                    print(f"重启失败: {exc}")
+                time.sleep(0.3)
+                os._exit(0)
+
+            import threading
+            threading.Timer(0.5, _restart).start()
+            return True
+
         # ===== 语音相关 =====
         @eel.expose
         def toggle_voice_from_web():
@@ -566,7 +690,11 @@ class WebBridge:
             """上传文件（使用tkinter文件对话框）"""
             try:
                 print("📎 开始文件上传流程...")
-                
+
+                # tkinter 只在真正要用的时候才导入，省下启动的几百毫秒
+                import tkinter as tk
+                from tkinter import filedialog
+
                 # 创建临时tk窗口
                 root = tk.Tk()
                 root.withdraw()  # 隐藏主窗口
@@ -694,49 +822,65 @@ def start_web_app(app_instance, port=0):
         port: Web服务器端口 (0为随机端口)
     """
     # 初始化Eel
+    import boot
+
+    boot.log("开始装配本地服务")
     web_folder = get_resource_path('web')
-    eel.init(web_folder, allowed_extensions=['.js', '.html', '.css', '.json', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.moc3', '.moc', '.vtube'])
-    
+    eel.init(
+        web_folder,
+        # 这里只影响“Python 是否能在前端 JS 里找 eel.expose 出来的函数”，
+        # 服务静态文件不受影响。之前把 .js/.css/.json 全列上，eel 会用
+        # pyparsing 把 pixi.min.js 这种几百 KB 的压缩文件整个解析一遍，
+        # 白白多花 2~3 秒。本项目没有 Python 调 JS 的用法，留 .html 足够。
+        allowed_extensions=['.html'],
+    )
+    boot.log("eel.init 完成")
+
     # ⭐ 动态注入版本号到 index.html
     index_path = os.path.join(web_folder, 'index.html')
     index_template_path = os.path.join(web_folder, 'index_template.html')
-    
+
     # 如果存在模板文件，使用模板；否则直接修改 index.html
     source_file = index_template_path if os.path.exists(index_template_path) else index_path
-    
+
     try:
         with open(source_file, 'r', encoding='utf-8') as f:
             html_content = f.read()
-        
+
         # 替换所有 ?v=数字 为当前版本号
         html_content = re.sub(r'\?v=\d+', f'?v={APP_VERSION}', html_content)
-        
+
+        # 把上次用的主题直接写进 <body>：页面第一帧就是对的配色，
+        # 不会先闪一下默认主题再被 JS 纠正。
+        theme_name = 'glass'
+        try:
+            theme_name = app_instance.theme_manager.current_theme_name or 'glass'
+        except Exception:
+            pass
+        boot_mode = 'extract' if app_paths.is_onefile() else 'fast'
+        html_content = re.sub(
+            r'<body data-theme="[^"]*"',
+            '<body data-theme="%s" data-boot="%s"' % (theme_name, boot_mode),
+            html_content, count=1)
+
         # 写入到 index.html（如果使用模板）或覆盖原文件
         with open(index_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
-        
-        print(f"✅ 已注入版本号: v={APP_VERSION}")
+
+        print(f"✅ 已注入版本号: v={APP_VERSION} 主题={theme_name}")
     except Exception as e:
-        print(f"⚠️ 版本号注入失败: {e}")
-    
-    # 调试：检查Live2D模型文件是否存在
+        # 装到 Program Files 这类只读目录时会走到这里，页面本身有 no-cache 头，不影响使用
+        print(f"⚠️ 版本号注入失败（目录可能只读）: {e}")
+
     live2d_path = os.path.join(web_folder, 'assets', 'live2d', 'live2d_modules-master', 'yumi', 'yumi.model3.json')
-    print(f"📁 Web目录: {web_folder}")
-    print(f"🎭 Live2D模型路径: {live2d_path}")
-    print(f"🎭 模型文件存在: {os.path.exists(live2d_path)}")
-    
-    # 列出assets目录内容
-    assets_path = os.path.join(web_folder, 'assets')
-    if os.path.exists(assets_path):
-        print(f"📂 assets目录内容: {os.listdir(assets_path)}")
-        live2d_assets = os.path.join(assets_path, 'live2d', 'live2d_modules-master')
-        if os.path.exists(live2d_assets):
-            print(f"📂 live2d模型目录内容: {os.listdir(live2d_assets)}")
-    else:
-        print(f"⚠️ assets目录不存在: {assets_path}")
-    
+    if not os.path.exists(live2d_path):
+        print(f"⚠️ Live2D 模型缺失: {live2d_path}")
+
+    boot.log("页面注入完成")
+
     # 创建桥接
     bridge = WebBridge(app_instance)
+    boot.log("桥接对象创建完成")
 
     # 将桥接实例保存到app中
     app_instance.web_bridge = bridge
@@ -748,6 +892,8 @@ def start_web_app(app_instance, port=0):
 
     url = 'http://127.0.0.1:%d/index.html' % port
     print("🚀 启动本地服务: %s" % url)
+
+    boot.log("桥接就绪，开始起服务")
 
     # eel 的服务器跑在自己的线程里（它需要独立的 gevent hub），
     # 主线程留给原生窗口，这样窗口不会带任何浏览器痕迹。
@@ -781,12 +927,17 @@ def start_web_app(app_instance, port=0):
 
     if hwnd is None:
         print("⚠️ 没能接管应用窗口，改为用默认浏览器打开")
+        close_splash("退回浏览器")
         try:
             import webbrowser
             webbrowser.open(url)
         except Exception:
             pass
         return
+
+    _arm_splash_watchdog()
+    time.sleep(0.6)
+    close_splash("Edge 窗口已接管")
 
     while True:
         time.sleep(1.0)
@@ -811,6 +962,14 @@ def _start_native_window(app_instance, url):
         return False
 
     try:
+        # 窗口底色跟着主题走：纸白主题下不该出现一圈深色的窗口边框
+        theme_bg = {
+            'glass': '#090c12',
+            'clay': '#f1f4ed',
+            'fresh': '#faf8f2',
+            'dark': '#070708',
+        }.get(getattr(getattr(app_instance, 'theme_manager', None), 'current_theme_name', ''), '#090c12')
+
         window = webview.create_window(
             '星织 · Hoshiori',
             url,
@@ -819,25 +978,24 @@ def _start_native_window(app_instance, url):
             min_size=(960, 640),
             frameless=True,
             easy_drag=False,
-            background_color='#090c12',
+            background_color=theme_bg,
         )
     except Exception as exc:
         print("⚠️ 创建窗口失败: %s" % exc)
         return False
 
     app_instance.window = window
+    boot.log("窗口对象已创建，交给 WebView2")
 
-    # 窗口已经出来了，撤掉启动画面
-    try:
-        import pyi_splash
-        pyi_splash.close()
-    except Exception:
-        pass
+    # 启动画面先留着，等页面真的画出第一帧（前端会回调 app_ready_from_web）
+    _arm_splash_watchdog()
 
     def _bind_handle():
         # 必须放后台：这个回调在 GUI 线程里跑，卡住会让窗口假死甚至被关掉
         def _find():
-            window_shell.find_by_title('星织', timeout=20, sleep=time.sleep)
+            hwnd = window_shell.find_by_title('星织', timeout=20, sleep=time.sleep)
+            if hwnd:
+                boot.log("原生窗口已绑定")
 
         import threading
         threading.Thread(target=_find, daemon=True).start()
@@ -853,9 +1011,9 @@ def _start_native_window(app_instance, url):
     window.events.closed += _on_closed
 
     print("🪟 启动原生窗口")
+    boot.log("webview.start()")
     try:
-        webview.start(private_mode=False, storage_path=os.path.join(
-            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'Hoshiori', 'webview'))
+        webview.start(private_mode=False, storage_path=app_paths.webview_dir())
     except Exception as exc:
         print("⚠️ 原生窗口启动失败: %s" % exc)
         return False
@@ -873,6 +1031,43 @@ def _pick_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
+
+
+# ---------------------------------------------------------------- 启动画面
+
+_SPLASH_CLOSED = False
+
+
+def close_splash(reason=""):
+    """撤掉 PyInstaller 的启动图。
+
+    只在单文件版里存在（onedir 版没有这个窗口），所以整段都容错。
+    一定要等页面画出第一帧之后再撤，否则中间会露出空白窗口。
+    """
+    global _SPLASH_CLOSED
+    if _SPLASH_CLOSED:
+        return False
+    _SPLASH_CLOSED = True
+    # 目录版没有预启动图，环境变量不存在时 pyi_splash 会抛 KeyError，先挡掉
+    if not os.environ.get('_PYI_SPLASH_IPC'):
+        return False
+    try:
+        import pyi_splash
+        pyi_splash.close()
+        boot.log("启动画面已撤下 %s" % reason)
+    except Exception:
+        return False
+    return True
+
+
+def _arm_splash_watchdog(timeout=25.0):
+    """页面万一崩了，也别让启动图永远挂在屏幕中间。"""
+    def _later():
+        time.sleep(timeout)
+        close_splash("超时兜底")
+
+    threading.Thread(target=_later, daemon=True).start()
+
 
 
 def _wait_port(port, timeout=15):

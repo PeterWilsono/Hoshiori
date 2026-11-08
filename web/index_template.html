@@ -20,14 +20,247 @@
     <link rel="stylesheet" href="css/components.css?v=1794134307">
     <link rel="stylesheet" href="css/animations.css?v=1794134307">
 
-    <!-- Cubism Core (官方 CDN，Live2D 运行时必需) -->
-    <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"
-            onerror="console.error('Cubism Core 加载失败，Live2D 将降级为静态立绘')"></script>
-    <!-- PixiJS + Cubism4 渲染插件（本地优先，CDN 兜底） -->
-    <script src="lib/pixi.min.js"
-            onerror="this.onerror=null;document.write('<script src=&quot;https://unpkg.com/pixi.js@6.5.10/dist/browser/pixi.min.js&quot;><\/script>')"></script>
-    <script src="lib/pixi-live2d-display.cubism4.min.js"
-            onerror="this.onerror=null;document.write('<script src=&quot;https://unpkg.com/pixi-live2d-display@0.4.0/dist/cubism4.min.js&quot;><\/script>')"></script>
+    <!-- 渲染运行时：本地优先 + defer，任何网络抖动都不会挡住第一帧 -->
+    <script defer src="lib/live2dcubismcore.min.js"></script>
+    <script defer src="lib/pixi.min.js"></script>
+    <script defer src="lib/pixi-live2d-display.cubism4.min.js"></script>
+
+    <!-- 启动画面样式内联在这里：它必须和 HTML 同一批字节到达，才不会有白屏 -->
+    <style>
+        html,
+        body {
+            background: var(--bg-chat, #090c12);
+        }
+
+        #bootScreen {
+            position: fixed;
+            inset: 0;
+            z-index: 9000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-chat, #090c12);
+            color: var(--ink-1, #ece8df);
+            -webkit-user-select: none;
+            user-select: none;
+            transition: opacity 460ms cubic-bezier(.22, .61, .36, 1), visibility 460ms linear;
+        }
+
+        #bootScreen.is-done {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        #bootScreen::before {
+            content: '';
+            position: absolute;
+            width: 720px;
+            height: 720px;
+            border-radius: 50%;
+            background: radial-gradient(circle, var(--accent-wash, rgba(169, 189, 240, .1)) 0%, transparent 68%);
+            opacity: .9;
+            animation: boot-breathe 4.6s ease-in-out infinite;
+        }
+
+        #bootScreen>* {
+            position: relative;
+        }
+
+        .boot__mark {
+            position: relative;
+            width: 108px;
+            height: 108px;
+            display: grid;
+            place-items: center;
+            margin-bottom: 38px;
+            animation: boot-mark-in 1000ms cubic-bezier(.16, 1, .3, 1) both;
+        }
+
+        .boot__ring {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 1px solid var(--line, rgba(233, 238, 248, .09));
+        }
+
+        .boot__ring--spin {
+            border-color: transparent;
+            border-top-color: var(--accent, #a9bdf0);
+            border-right-color: var(--accent-line, rgba(169, 189, 240, .3));
+            animation: boot-spin 1500ms linear infinite;
+        }
+
+        .boot__ring--slow {
+            inset: 15px;
+            border-color: var(--line-faint, rgba(233, 238, 248, .045));
+            animation: boot-spin 16000ms linear infinite reverse;
+        }
+
+        .boot__star {
+            width: 36px;
+            height: 36px;
+            color: var(--accent, #a9bdf0);
+            filter: drop-shadow(0 0 12px var(--accent-glow, rgba(169, 189, 240, .5)));
+            animation: boot-star 2600ms ease-in-out infinite;
+        }
+
+        .boot__name {
+            font-size: 29px;
+            font-weight: 400;
+            letter-spacing: .32em;
+            text-indent: .32em;
+            color: var(--ink-1, #ece8df);
+            animation: boot-rise 760ms 90ms cubic-bezier(.16, 1, .3, 1) both;
+        }
+
+        .boot__latin {
+            margin-top: 14px;
+            font-size: 10px;
+            letter-spacing: .5em;
+            text-indent: .5em;
+            color: var(--ink-4, #79808f);
+            animation: boot-rise 760ms 180ms cubic-bezier(.16, 1, .3, 1) both;
+        }
+
+        .boot__track {
+            position: relative;
+            margin-top: 46px;
+            width: 234px;
+            height: 2px;
+            border-radius: 2px;
+            background: var(--line, rgba(233, 238, 248, .09));
+            animation: boot-rise 760ms 260ms cubic-bezier(.16, 1, .3, 1) both;
+        }
+
+        .boot__fill {
+            position: relative;
+            display: block;
+            width: 0;
+            min-width: 10px;
+            height: 100%;
+            border-radius: 2px;
+            /* 实色而不是渐变：浅色主题下从 0 起步也要看得见 */
+            background: var(--accent, #a9bdf0);
+            box-shadow: 0 0 16px var(--accent-glow, rgba(169, 189, 240, .42));
+            transition: width 520ms cubic-bezier(.22, .61, .36, 1);
+        }
+
+        /* 进度前头的一颗亮点，像信号灯在往前走 */
+        .boot__fill::after {
+            content: '';
+            position: absolute;
+            right: -2px;
+            top: 50%;
+            width: 4px;
+            height: 4px;
+            margin-top: -2px;
+            border-radius: 50%;
+            background: var(--warm, #e6c39b);
+            box-shadow: 0 0 10px var(--warm, #e6c39b);
+        }
+
+        .boot__status {
+            margin-top: 19px;
+            height: 16px;
+            font-size: 11.5px;
+            letter-spacing: .22em;
+            color: var(--ink-4, #79808f);
+            transition: opacity 140ms ease;
+        }
+
+        .boot__status.is-swapping {
+            opacity: 0;
+        }
+
+        .boot__foot {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 34px;
+            text-align: center;
+            font-size: 11px;
+            letter-spacing: .12em;
+            color: var(--ink-4, #79808f);
+            opacity: .62;
+            display: none;
+        }
+
+        /* 只有单文件版（每次启动都要解压）才需要这句解释 */
+        body[data-boot="extract"] .boot__foot {
+            display: block;
+            animation: boot-rise 760ms 1100ms cubic-bezier(.16, 1, .3, 1) both;
+        }
+
+        @keyframes boot-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes boot-star {
+
+            0%,
+            100% {
+                opacity: .72;
+                transform: scale(.93);
+            }
+
+            50% {
+                opacity: 1;
+                transform: scale(1.07);
+            }
+        }
+
+        @keyframes boot-rise {
+            from {
+                opacity: 0;
+                transform: translateY(7px);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        @keyframes boot-mark-in {
+            from {
+                opacity: 0;
+                transform: scale(.84);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        @keyframes boot-breathe {
+
+            0%,
+            100% {
+                opacity: .55;
+                transform: scale(.96);
+            }
+
+            50% {
+                opacity: .95;
+                transform: scale(1.04);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+
+            .boot__ring--spin,
+            .boot__ring--slow,
+            .boot__star,
+            #bootScreen::before {
+                animation: none;
+            }
+        }
+    </style>
 
     <!-- Eel JavaScript -->
     <script type="text/javascript" src="/eel.js"></script>
@@ -123,6 +356,24 @@
                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
         </symbol>
     </svg>
+
+    <!-- ===== 启动画面 ===== -->
+    <div id="bootScreen" role="status" aria-live="polite">
+        <div class="boot__mark" aria-hidden="true">
+            <span class="boot__ring"></span>
+            <span class="boot__ring boot__ring--spin"></span>
+            <span class="boot__ring boot__ring--slow"></span>
+            <svg class="boot__star" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 2c.5 5.5 4.5 9.5 10 10-5.5.5-9.5 4.5-10 10-.5-5.5-4.5-9.5-10-10 5.5-.5 9.5-4.5 10-10z"
+                    fill="currentColor" />
+            </svg>
+        </div>
+        <div class="boot__name">星织</div>
+        <div class="boot__latin">HOSHIIORI</div>
+        <div class="boot__track"><span class="boot__fill" id="bootFill"></span></div>
+        <div class="boot__status" id="bootStatus">正在点亮灯…</div>
+        <div class="boot__foot">首次启动需要解压运行组件，会比平时慢一些</div>
+    </div>
 
     <!-- ===== 环境光层 ===== -->
     <div class="ambient" aria-hidden="true">
@@ -333,6 +584,7 @@
     <div id="toastLayer" class="toast-layer" aria-live="polite" aria-atomic="false"></div>
 
     <!-- JavaScript文件 -->
+    <script src="js/boot.js?v=1794134307"></script>
     <script src="js/utils.js?v=1794134307"></script>
     <script src="js/theme.js?v=1794134307"></script>
     <script src="js/chat.js?v=1794134307"></script>

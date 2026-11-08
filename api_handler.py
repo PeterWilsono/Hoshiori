@@ -1,9 +1,38 @@
 # -*- coding: utf-8 -*-
-import requests
 import os
 import re
+import threading
 from typing import Dict, Any  # ⭐ 添加类型导入
 from emotion_analyzer import EmotionAnalyzer  # ⭐ 新增
+
+# requests 连同 urllib3 / http.client 要吃掉 1.5 秒左右，
+# 而它只在真正发请求时才用得上——所以放到首次调用时再导入，
+# 启动时只让一个后台线程悄悄把它预热好。
+_requests = None
+_requests_lock = threading.Lock()
+
+
+def get_requests():
+    """按需导入 requests，顺带做线程安全的缓存。"""
+    global _requests
+    if _requests is not None:
+        return _requests
+    with _requests_lock:
+        if _requests is None:
+            import requests
+            _requests = requests
+    return _requests
+
+
+def prewarm_http():
+    """在后台把 HTTP 依赖预热好，用户发第一条消息时就不会卡一下。"""
+    def _run():
+        try:
+            get_requests()
+        except Exception as exc:
+            print("⚠️ HTTP 依赖预热失败: %s" % exc)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 class APIHandler:
@@ -458,7 +487,7 @@ JSON格式(严格遵守):
             # 打印完整的payload用于调试
             print(f"📤 请求参数: model={payload['model']}, thinking={payload.get('thinking')}, webSearchEnabled={payload.get('webSearchEnabled', False)}")
             
-            response = requests.post(
+            response = get_requests().post(
                 self.api_endpoint,
                 headers=headers,
                 json=payload,
