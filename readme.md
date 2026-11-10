@@ -16,17 +16,17 @@
 
 ## ⬇️ 下载安装（Windows）
 
-去 [Releases](https://github.com/PeterWilsono/Hoshiori/releases/latest) 下载 **`Hoshiori-Setup-2.1.1.exe`**，双击安装。
+去 [Releases](https://github.com/PeterWilsono/Hoshiori/releases/latest) 下载 **`Hoshiori-Setup-2.1.2.exe`**，双击安装。
 
 - 安装到哪里由你决定：默认会挑一块**非系统盘**（比如 `D:\Hoshiori`），也可以点「浏览…」换地方
 - 装完桌面和开始菜单会有快捷方式，Windows「应用和功能」里能直接卸载
 - 卸载只删程序，你的对话和设置留在数据目录里，不会丢
-- 不想装也行：同一页还有 `Hoshiori-2.1.1-win64.zip`（解压即用）和 `Hoshiori.exe`（单文件便携）
+- 不想装也行：同一页还有 `Hoshiori-2.1.2-win64.zip`（解压即用）和 `Hoshiori.exe`（单文件便携）
 
 | 文件 | 适合谁 | 启动速度 |
 | --- | --- | --- |
-| **`Hoshiori-Setup-2.1.1.exe`**（推荐） | 想要快捷方式、想从系统里干净卸载 | 约 5 秒 |
-| `Hoshiori-2.1.1-win64.zip` | 不想装、解压就用 | 约 5 秒 |
+| **`Hoshiori-Setup-2.1.2.exe`**（推荐） | 想要快捷方式、想从系统里干净卸载 | 约 5 秒 |
+| `Hoshiori-2.1.2-win64.zip` | 不想装、解压就用 | 约 5 秒 |
 | `Hoshiori.exe` | 只带一个文件到处跑 | 每次启动要先解压，约 25 秒 |
 
 > 安装包约 164MB。比上一版大了 40MB，因为内置了本地语义模型（24MB）和 ONNX 运行时。
@@ -399,6 +399,7 @@ hoshiori-ai/
 ├── embedder.py                # 本地语义向量（bge-small-zh / ONNX，可降级）
 ├── bert_tokenizer.py          # BERT WordPiece 分词（纯标准库）
 ├── safety.py                  # 本地风险识别（命中只改提示词，不拦截）
+├── runtime_guard.py           # 收掉 WebView2 漏在后台的进程（--unlock）
 ├── daily_life.py              # 她自己的日子：按天记流水，注入提示词
 ├── proactive.py               # 她会先开口：定时判断 + 现写话题（可关）
 ├── cognitive_system.py        # 动机与个性化（旧，主动消息已改由 proactive 负责）
@@ -512,6 +513,20 @@ venv\Scripts\activate  # Windows
 # 安装开发依赖
 pip install -r requirements.txt
 ```
+
+### 改前端时提示"文件被占用 / 权限不足"
+
+主窗口是 WebView2。如果上一次是崩溃退出或者被任务管理器强杀的，
+`msedgewebview2.exe` 会留在后台，握着页面文件的句柄——这时的报错是
+`Permission denied`，但文件属性、ACL、`os.access` 全都说可写，
+很容易查错方向。
+
+```bash
+python main.py --unlock      # 或者 python runtime_guard.py
+```
+
+它会列出相关的窗口进程、标出哪个是孤儿，然后清掉。正常情况下不用管，
+程序启动和退出都已经自动处理了。
 
 ### 代码规范
 

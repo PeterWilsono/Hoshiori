@@ -772,6 +772,14 @@ def main():
         _handle_uninstall()
         return
 
+    # --unlock：手动清掉上次没退干净的窗口进程。
+    # 开发时改前端提示"文件被占用/权限不足"，跑一下这个就好，
+    # 不用去任务管理器里一个个翻 msedgewebview2。
+    if '--unlock' in sys.argv:
+        import runtime_guard
+        runtime_guard.main([a for a in sys.argv[1:] if a != '--unlock'])
+        return
+
     print("=" * 50)
     print("🌟 星织 - 智能对话助手")
     print("=" * 50)

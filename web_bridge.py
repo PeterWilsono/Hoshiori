@@ -19,6 +19,7 @@ import app_paths
 import boot
 import db
 import window_shell
+import runtime_guard
 import document_reader
 
 try:
@@ -1357,13 +1358,18 @@ def start_web_app(app_instance, port=0):
     if not _wait_port(port, timeout=15):
         print("⚠️ 本地服务未就绪")
 
+    # 先把上次崩溃/被强杀留下的窗口进程收了。放线程里是因为真要查命令行
+    # 得 1.3 秒，站在这儿等会拖慢冷启动；这时候自己的 WebView2 还没起，
+    # 也不会误伤自己。
+    _sweep_stale_async()
+
     if _start_native_window(app_instance, url):
         return
 
     # 没有 WebView2 时退回 Edge 应用窗口
     print("⚠️ 原生窗口不可用，改用 Edge 应用窗口")
     existing = [hwnd for hwnd, _ in window_shell.list_windows()]
-    window_shell.launch(url, 1300, 900)
+    browser_proc = window_shell.launch(url, 1300, 900)
     hwnd = window_shell.adopt(existing, 1300, 900, timeout=40)
 
     if hwnd is None:
@@ -1388,7 +1394,36 @@ def start_web_app(app_instance, port=0):
                 app_instance.conversation_manager.save_conversations()
             except Exception:
                 pass
+            # 浏览器进程要显式收掉：只关窗口的话，Edge 有时会留在后台
+            try:
+                if browser_proc is not None:
+                    browser_proc.terminate()
+            except Exception:
+                pass
+            try:
+                runtime_guard.kill_children()
+            except Exception:
+                pass
             os._exit(0)
+
+
+def _sweep_stale_async():
+    """后台清掉上次崩溃/被强杀留下的 WebView2。
+
+    单独开线程：判断孤儿要先看进程快照（12ms），但确认是不是我们的
+    得读命令行（1.3 秒）。这个时间不该算进冷启动。
+    """
+    def work():
+        try:
+            runtime_guard.sweep_stale(app_paths.webview_dir())
+        except Exception as exc:
+            print("⚠️ 清理残留窗口进程失败: %s" % exc)
+
+    try:
+        import threading
+        threading.Thread(target=work, daemon=True).start()
+    except Exception:
+        pass
 
 
 def _start_native_window(app_instance, url):
@@ -1453,6 +1488,7 @@ def _start_native_window(app_instance, url):
 
     print("🪟 启动原生窗口")
     boot.log("webview.start()")
+
     try:
         webview.start(private_mode=False, storage_path=app_paths.webview_dir())
     except Exception as exc:
@@ -1462,6 +1498,13 @@ def _start_native_window(app_instance, url):
     # webview.start() 在窗口关闭后返回
     try:
         app_instance.conversation_manager.save_conversations()
+    except Exception:
+        pass
+
+    # 收尾：pywebview 偶尔会留下 WebView2 的子进程，留着会占内存、
+    # 还会一直握着数据目录和页面文件的句柄。
+    try:
+        runtime_guard.kill_children()
     except Exception:
         pass
     os._exit(0)
