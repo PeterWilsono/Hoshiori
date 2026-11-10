@@ -111,6 +111,19 @@ def _balanced_json(text, must_have=("appraisal", "dominant_emotion", "relationsh
     return None, None
 
 
+def _has_word(text):
+    """这句话里有没有真的说出字来。
+
+    纯标点、纯省略号、纯空白都算没说话——模型偶尔会"省"过头，
+    用户在界面上就只看到一个「...」，像是坏了。
+    """
+    if not text:
+        return False
+    # \w 已经把中文和字母数字包进来了；emoji 单独放行，
+    # 因为「😭」本身也是一种回答。
+    return bool(re.search(r"[\w\U0001F300-\U0001FAFF]", text))
+
+
 class AIChatAppWeb:
     """星织AI助手 - Web版本"""
     
@@ -428,6 +441,13 @@ class AIChatAppWeb:
             
             if success:
                 clean_result = self._process_ai_response(result)
+
+                # 只回了一串标点：模型把"可以很短"理解成了"可以不说"。
+                # 流式还没往外吐过东西时才纠正——已经吐过了就认了，
+                # 免得把她刚说出口的话又抹掉。
+                if not _has_word(clean_result) and not (streamer and streamer.any_emitted):
+                    print("ℹ️ 回复只有标点（%r），换成一句短话" % clean_result)
+                    clean_result = "……嗯，我在。"
 
                 if streamer is not None and streamer.any_emitted:
                     # 流式已经把绝大部分推过了，这里只补最后一段

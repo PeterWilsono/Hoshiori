@@ -441,7 +441,9 @@
 
     /** 发送前调用：如果正在编辑，先把旧的那条删掉 */
     async function applyPendingEdit() {
-        if (!pendingEdit) return true;
+        // 没有在改的时候必须返回 false：调用方靠它决定要不要重建聊天区。
+        // 以前一律返回 true，等于每发一条消息都重绘整段对话。
+        if (!pendingEdit) return false;
         const target = pendingEdit.msgId;
         pendingEdit = null;
         try {
@@ -454,7 +456,9 @@
         const composer = $('composer');
         if (bar) bar.hidden = true;
         if (composer) composer.classList.remove('is-editing');
-        return true;
+        // 返回被替换的那条的 id：调用方据此只摘掉这一段气泡，
+        // 不用把整段对话清空重画（那样会闪，还会重放所有入场动画）。
+        return target;
     }
 
     /* ==========================================================
@@ -480,7 +484,7 @@
 
         box.appendChild(node);
         if (typeof updateWelcome === 'function') updateWelcome();
-        if (stick) setTimeout(() => scrollToBottom(true), 60);
+        if (stick) scrollToBottom(false);
 
         // 光室里也动一下，让她"刚说过话"这件事有落点
         const avatar = $('avatarImage');

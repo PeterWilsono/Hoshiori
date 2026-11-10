@@ -16,17 +16,17 @@
 
 ## ⬇️ 下载安装（Windows）
 
-去 [Releases](https://github.com/PeterWilsono/Hoshiori/releases/latest) 下载 **`Hoshiori-Setup-2.1.0.exe`**，双击安装。
+去 [Releases](https://github.com/PeterWilsono/Hoshiori/releases/latest) 下载 **`Hoshiori-Setup-2.1.1.exe`**，双击安装。
 
 - 安装到哪里由你决定：默认会挑一块**非系统盘**（比如 `D:\Hoshiori`），也可以点「浏览…」换地方
 - 装完桌面和开始菜单会有快捷方式，Windows「应用和功能」里能直接卸载
 - 卸载只删程序，你的对话和设置留在数据目录里，不会丢
-- 不想装也行：同一页还有 `Hoshiori-2.1.0-win64.zip`（解压即用）和 `Hoshiori.exe`（单文件便携）
+- 不想装也行：同一页还有 `Hoshiori-2.1.1-win64.zip`（解压即用）和 `Hoshiori.exe`（单文件便携）
 
 | 文件 | 适合谁 | 启动速度 |
 | --- | --- | --- |
-| **`Hoshiori-Setup-2.1.0.exe`**（推荐） | 想要快捷方式、想从系统里干净卸载 | 约 5 秒 |
-| `Hoshiori-2.1.0-win64.zip` | 不想装、解压就用 | 约 5 秒 |
+| **`Hoshiori-Setup-2.1.1.exe`**（推荐） | 想要快捷方式、想从系统里干净卸载 | 约 5 秒 |
+| `Hoshiori-2.1.1-win64.zip` | 不想装、解压就用 | 约 5 秒 |
 | `Hoshiori.exe` | 只带一个文件到处跑 | 每次启动要先解压，约 25 秒 |
 
 > 安装包约 164MB。比上一版大了 40MB，因为内置了本地语义模型（24MB）和 ONNX 运行时。

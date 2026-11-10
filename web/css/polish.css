@@ -1,3 +1,29 @@
+
+/* ------------------------------------------------------------
+   0. 滚动：不让浏览器替我们猜
+   ------------------------------------------------------------
+   overflow-anchor 是 Chromium 的「滚动锚定」：DOM 一变它就自己调
+   scrollTop，好让视线不跳。可我们本来就按「是否贴底」自己滚，
+   两套逻辑打架时就会看到先顿一下再被拽走。这里关掉，交给自己。
+   ------------------------------------------------------------ */
+.chat-container {
+    overflow-anchor: none;
+}
+
+/* 内容不满一屏时，容器上下各有 34px / 8px 的 padding，
+   而 .chat-messages 的 min-height:100% 是按 clientHeight 算的，
+   于是 scrollHeight 永远比可视区多 42px——短对话也能上下挪一小段。
+   把这 42px 扣掉，短对话就彻底不动。 */
+.chat-messages {
+    min-height: calc(100% - 42px);
+}
+
+/* 重开一段对话时，历史是一口气画出来的，不该一条条淡入——
+   那看着像"刷"了一下，还让首屏多等几百毫秒。
+   新消息仍然照常入场，只是恢复历史这一段关掉。 */
+.chat-messages.is-restoring .message-bubble {
+    animation: none !important;
+}
 /* ============================================================
    打磨层
    ------------------------------------------------------------
@@ -325,14 +351,23 @@
     transform: translateX(6px);
     transition: opacity var(--dur-2) var(--ease-soft), transform var(--dur-2) var(--ease);
     pointer-events: none;
+    z-index: 2;
 }
 
+/* 你发的那条靠右，笔放左边——放下面是压在下一轮的字上，
+   而且被下一轮盖住，鼠标根本点不到。 */
 .message-bubble.user .msg-actions {
     left: auto;
-    right: 2px;
-    top: 100%;
-    margin-top: 1px;
-    transform: translateY(-2px);
+    right: calc(100% + 10px);
+    top: 50%;
+    margin-top: 0;
+    transform: translateY(-50%) translateX(6px);
+}
+
+.message-bubble.user:hover .msg-actions,
+.message-bubble.user:focus-within .msg-actions {
+    /* 这里要把垂直居中一起写回来，只写 transform: none 会让它往下跳 */
+    transform: translateY(-50%);
 }
 
 .message-bubble:hover .msg-actions,

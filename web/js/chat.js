@@ -153,10 +153,20 @@ async function sendMessage() {
 
     // 正在"改一下重发"的话，先把旧的那条（以及它之后的）删掉。
     // 必须先截断再插新消息，否则会多出一条重复的。
+    //
+    // 注意这里要看返回值：以前写成「函数存在就重建」，而它永远存在，
+    // 结果每发一条消息都把整个聊天区清空重拉一遍——屏幕先空一下，
+    // 再从顶部滑下来。这就是"闪一下"的来源。
     if (typeof applyPendingEdit === 'function') {
-        await applyPendingEdit();
-        clearChat();
-        await loadCurrentConversation();
+        const cutFrom = await applyPendingEdit();
+        if (cutFrom) {
+            // 只摘掉被换掉的那条及其之后的，其余的留在原地。
+            // 整段清空重画会闪一下，也没必要——库里已经截断好了。
+            if (!removeMessagesFrom(cutFrom)) {
+                clearChat();
+                await loadCurrentConversation();
+            }
+        }
     }
 
     // 显示用户消息
@@ -167,8 +177,9 @@ async function sendMessage() {
     clearFile();
     if (typeof window.resetComposer === 'function') window.resetComposer();
 
-    // 滚动到底部
-    scrollToBottom(true);
+    // 输入框清空后会变矮，聊天区的可视高度跟着变。
+    // 等这一帧的布局算完再贴一次底——必须立刻贴，不能滑。
+    requestAnimationFrame(() => scrollToBottom(false));
 
     // 设置等待状态
     isWaitingForResponse = true;
@@ -330,8 +341,10 @@ function displayMessage(role, content, continuation = false) {
     chatMessages.appendChild(node);
     updateWelcome();
 
+    // 自己发的消息无论如何都要看见；她的话只在本来就在底部时才跟。
+    // 这里必须是「立刻」：用平滑动画的话，长对话里会从上面一路滑下来。
     if (stick || role === 'user') {
-        setTimeout(() => scrollToBottom(true), 60);
+        scrollToBottom(false);
     }
 }
 
@@ -358,9 +371,7 @@ function receiveAIResponse(content) {
         }
     }
 
-    const stick = isNearBottom();
     displayMessage('ai', content);
-    if (stick) scrollToBottom(true);
 
     isWaitingForResponse = false;
     if (typeof markSent === 'function') markSent();
@@ -381,7 +392,7 @@ function appendAIResponse(extra) {
         const body = node.querySelector('.msg-body');
         if (!body) break;
         body.appendChild(document.createTextNode(extra));
-        if (isNearBottom()) scrollToBottom(true);
+        if (isNearBottom()) scrollToBottom(false);
         return;
     }
     // 没有可追加的气泡，就当成一条新消息
@@ -413,7 +424,7 @@ function showTypingIndicator() {
 
     chatMessages.appendChild(indicator);
     updateWelcome();
-    scrollToBottom(true);
+    scrollToBottom(false);
 }
 
 /**
@@ -432,11 +443,21 @@ function removeTypingIndicator() {
 function scrollToBottom(smooth = false) {
     const container = document.getElementById('chatContainer');
     if (!container) return;
+
+    const top = Math.max(0, container.scrollHeight - container.clientHeight);
+
     if (smooth) {
-        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-    } else {
-        container.scrollTop = container.scrollHeight;
+        container.scrollTo({ top, behavior: 'smooth' });
+        return;
     }
+
+    // 容器上写着 scroll-behavior: smooth，所以连 scrollTop = xxx 都会被做成动画。
+    // 想「真的立刻贴上底部」只能先把这条规则临时摘掉，写完再恢复。
+    const prev = container.style.scrollBehavior;
+    container.style.scrollBehavior = 'auto';
+    container.scrollTop = top;
+    void container.offsetHeight;        // 强制应用一次，别让恢复样式把这次滚动吞掉
+    container.style.scrollBehavior = prev;
 }
 
 /**
@@ -473,6 +494,24 @@ function clearChat() {
 }
 
 /**
+ * 把某条消息及其之后的所有气泡从界面上摘掉（「改一下重发」用）。
+ *
+ * 一轮回复会拆成好几个气泡，它们带着同一个 msgId，所以从目标那条开始
+ * 一直删到底即可。返回是否找到了目标——找不到就让调用方退回整段重载。
+ */
+function removeMessagesFrom(msgId) {
+    const box = document.getElementById('chatMessages');
+    if (!box) return false;
+    const target = String(msgId);
+    const nodes = Array.from(box.children);
+    const start = nodes.findIndex(n => n.dataset && n.dataset.msgId === target);
+    if (start < 0) return false;
+    for (let i = nodes.length - 1; i >= start; i--) nodes[i].remove();
+    updateWelcome();
+    return true;
+}
+
+/**
  * 加载当前对话
  */
 async function loadCurrentConversation() {
@@ -488,6 +527,9 @@ async function loadCurrentConversation() {
 
         if (conversation && conversation.messages) {
             clearChat();
+            // 历史是一次性画的，别让每条都播一遍入场动画
+            const box = document.getElementById('chatMessages');
+            if (box) box.classList.add('is-restoring');
             let idx = 0;
             for (const msg of conversation.messages) {
                 const role = msg.role === 'user' ? 'user' : (msg.role === 'assistant' ? 'ai' : 'system');
@@ -511,11 +553,21 @@ async function loadCurrentConversation() {
             }
             updateWelcome();
             scrollToBottom(false);
+            // 字体、代码块、图片会把高度再撑一点，下一帧补一次，
+            // 否则会看到「停在一半」再补上的动作。
+            // 动画开关也在这一帧恢复：几何已经算好了，恢复不会引起跳动。
+            requestAnimationFrame(() => {
+                scrollToBottom(false);
+                if (box) box.classList.remove('is-restoring');
+            });
         } else {
             updateWelcome();
         }
     } catch (e) {
         console.error('Load conversation error:', e);
+        // 出错时别把这个类留下来，否则之后的新消息也不播入场动画了
+        const box = document.getElementById('chatMessages');
+        if (box) box.classList.remove('is-restoring');
         updateWelcome();
     }
 }
