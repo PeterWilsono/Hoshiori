@@ -167,6 +167,162 @@
     justify-content: center;
 }
 
+/* 记忆列表（设置 → 存储） */
+.memory-list {
+    max-height: 210px;
+    overflow-y: auto;
+    margin-top: 10px;
+    border: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+    border-radius: 10px;
+}
+
+.memory-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    border-bottom: 1px solid var(--line, rgba(0, 0, 0, 0.06));
+}
+
+.memory-item:last-child {
+    border-bottom: none;
+}
+
+.memory-item.is-dead {
+    opacity: 0.42;
+    text-decoration: line-through;
+}
+
+.memory-item__kind {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--ink-4);
+    background: var(--fill-1, rgba(0, 0, 0, 0.04));
+}
+
+.memory-item__text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink-2);
+}
+
+.memory-item__scope {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    background: var(--accent-wash);
+    border: 1px solid var(--accent-line);
+}
+
+.memory-empty {
+    margin: 0;
+    padding: 18px 14px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--ink-4);
+}
+
+.memory-filter {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.memory-chip {
+    padding: 5px 11px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--ink-3);
+    font-family: var(--font-sans);
+    font-size: 11.5px;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease),
+                background var(--dur-1) var(--ease);
+}
+
+.memory-chip:hover {
+    color: var(--ink-2);
+    border-color: var(--line-strong);
+}
+
+.memory-chip.is-active {
+    color: var(--accent);
+    border-color: var(--accent-line);
+    background: var(--accent-wash);
+}
+
+/* 关系状态卡 */
+.bond-card {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border-radius: var(--r-md, 12px);
+    border: 1px solid var(--line);
+    background: var(--fill-1, rgba(0, 0, 0, 0.03));
+}
+
+.bond-card__head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.bond-card__label {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--ink-4);
+}
+
+.bond-card__stage {
+    font-family: var(--font-serif, var(--font-sans));
+    font-size: 15px;
+    color: var(--ink-1);
+}
+
+.bond-card__dot {
+    color: var(--ink-4);
+}
+
+.bond-card__mood {
+    font-size: 12.5px;
+    color: var(--ink-3);
+}
+
+.bond-card__hint {
+    margin: 6px 0 0;
+    font-size: 11.5px;
+    line-height: 1.65;
+    color: var(--ink-4);
+}
+
+.memory-item__del {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    border: none;
+    background: transparent;
+    color: var(--ink-4);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+.memory-item__del:hover {
+    color: var(--danger, #c0392b);
+    background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+}
+
 /* ------------------------------------------------------------
    消息
    ------------------------------------------------------------ */
@@ -186,14 +342,25 @@
 
 .message-bubble.ai .msg-rule {
     position: relative;
+    margin-bottom: 10px;
+}
+
+/* 一条回复被切成多个气泡时，只有第一个带星标和时间，
+   后面几个是「同一段话的续句」，不再重复落款 */
+.message-bubble.ai.is-cont .msg-rule {
+    display: none;
+}
+
+.message-bubble.ai.is-cont {
+    margin-top: -2px;
 }
 
 .msg-rule {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     height: 14px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     color: var(--ink-4);
 }
 
@@ -222,19 +389,27 @@
     height: 100%;
 }
 
-.msg-rule__line {
-    flex: 1;
-    height: 1px;
-    margin-left: -22px;
-    background: linear-gradient(to right, var(--line-strong), var(--line) 42%, transparent 88%);
-}
-
+/* 落款紧跟在星标右边：这样「时间」不会再飘到右边去，
+   看起来像是在给上面那条用户消息收尾（那正是分组错位的根源）。 */
 .msg-rule__time {
+    order: -1;
+    flex: 0 0 auto;
+    margin-left: 2px;
     font-family: var(--font-num);
     font-size: 10px;
     letter-spacing: 0.12em;
     color: var(--ink-4);
     font-variant-numeric: tabular-nums;
+}
+
+/* 一小段刻度线，不做通栏分隔线：通栏会把上一轮"截断"，视觉上错认成一组 */
+.msg-rule__line {
+    flex: 0 0 auto;
+    width: 76px;
+    height: 1px;
+    margin-left: 2px;
+    background: linear-gradient(to right, var(--line-strong), transparent 92%);
+    opacity: 0.9;
 }
 
 .msg-copy {
@@ -373,6 +548,8 @@
 /* 你：纸片 */
 .message-bubble.user {
     align-self: flex-end;
+    /* 你说话 = 新一轮的开始，和上一轮她的回答之间要留出明显的空白 */
+    margin-top: 26px;
     width: auto;
     max-width: min(34rem, 84%);
     padding: 14px 18px 15px;
@@ -380,6 +557,10 @@
     background: var(--user-bg);
     color: var(--user-ink);
     box-shadow: 0 16px 34px -26px rgba(0, 0, 0, 0.7);
+}
+
+.message-bubble.user:first-child {
+    margin-top: 0;
 }
 
 .message-bubble.user .msg-body {
@@ -1140,6 +1321,23 @@
     font-size: 12.5px;
 }
 
+/* 设置页里「当前声音」只读展示 */
+.voice-current {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm, 8px);
+    background: var(--bg-elev);
+    font-size: 13px;
+    color: var(--ink-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .form-input:focus,
 .form-textarea:focus,
 .form-select:focus {
@@ -1356,8 +1554,7 @@
     color: var(--accent);
     font-family: var(--font-sans);
     font-size: 9px;
-    letter-spacing: 0.12em;
-}
+    letter-spacing: 0.12em;}
 
 .conversation-item.is-removing {
     opacity: 0;
@@ -1683,4 +1880,115 @@
     .btn-send {
         margin-left: auto;
     }
+}
+
+/* ===== 新对话：延续 / 重新认识 ===== */
+.continuity-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.continuity-lead {
+    margin: 0 0 2px;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--ink-3);
+}
+
+.continuity-option {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 15px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    cursor: pointer;
+    transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+
+.continuity-option:hover {
+    border-color: var(--line-strong);
+}
+
+.continuity-option.is-selected {
+    border-color: var(--accent-line);
+    background: var(--accent-wash);
+}
+
+.continuity-option input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.continuity-mark {
+    position: relative;
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+    margin-top: 2px;
+    border-radius: 50%;
+    border: 1px solid var(--line-strong);
+}
+
+.continuity-option.is-selected .continuity-mark {
+    border-color: var(--accent);
+}
+
+.continuity-option.is-selected .continuity-mark::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+.continuity-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.continuity-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+    color: var(--ink-1);
+}
+
+.continuity-tag {
+    padding: 1px 6px;
+    border-radius: var(--r-pill);
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    background: var(--fill-2, rgba(0, 0, 0, 0.05));
+    border: 1px solid var(--accent-line);
+}
+
+.continuity-desc {
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--ink-3);
+}
+
+.continuity-foot {
+    margin: 4px 0 0;
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--ink-4);
+}
+
+.conversation-meta__break {
+    margin-left: 4px;
+    padding: 1px 6px;
+    border-radius: var(--r-pill);
+    background: var(--fill-2, rgba(0, 0, 0, 0.05));
+    color: var(--ink-4);
+    font-size: 9px;
+    letter-spacing: 0.1em;
 }

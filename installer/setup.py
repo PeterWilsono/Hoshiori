@@ -22,7 +22,11 @@ import webview
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import app_install  # noqa: E402
 
-VERSION = "1.3.0"
+try:
+    from version import VERSION          # 项目根目录的 version.py，打包时一起带上
+except Exception:                        # 极端情况下（单独跑这个文件）兜底
+    VERSION = "0.0.0"
+
 FROZEN = getattr(sys, "frozen", False)
 
 

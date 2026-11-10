@@ -96,6 +96,16 @@ class ConfigManager:
         
         # ⭐ 立绘显示开关（默认开启）
         self.show_avatar = True
+
+        # ⭐ 语音：音色与引擎（千问 / 本地大模型 / Fish / 百度 / 系统语音）
+        self.tts_enabled = False
+        self.tts_voice = ""
+        self.tts_engine = "auto"
+        self.tts_api_key = ""          # 阿里云百炼 Key（和聊天模型分开存）
+        self.tts_fish_key = ""         # Fish Audio Key（可选）
+        self.tts_local_url = "http://127.0.0.1:9880"
+        self.tts_ref_audio = ""        # 本地克隆类服务的参考音频（可选）
+        self.tts_emotion = True        # 按角色情绪调整语气
         
         # 创建保存目录
         if not os.path.exists(self.save_dir):
@@ -167,7 +177,15 @@ class ConfigManager:
                 "local_api_key": self.local_api_key,
                 "local_api_endpoint": self.local_api_endpoint,
                 "local_model": self.local_model,
-                "show_avatar": self.show_avatar
+                "show_avatar": self.show_avatar,
+                "tts_enabled": self.tts_enabled,
+                "tts_voice": self.tts_voice,
+                "tts_engine": self.tts_engine,
+                "tts_api_key": self.tts_api_key,
+                "tts_fish_key": self.tts_fish_key,
+                "tts_local_url": self.tts_local_url,
+                "tts_ref_audio": self.tts_ref_audio,
+                "tts_emotion": self.tts_emotion
             }
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
@@ -194,5 +212,13 @@ class ConfigManager:
                     self.local_api_endpoint = config.get("local_api_endpoint", self.local_api_endpoint)
                     self.local_model = config.get("local_model", self.local_model)
                     self.show_avatar = config.get("show_avatar", True)
+                    self.tts_enabled = config.get("tts_enabled", False)
+                    self.tts_voice = config.get("tts_voice", "")
+                    self.tts_engine = config.get("tts_engine", "auto")
+                    self.tts_api_key = config.get("tts_api_key", "")
+                    self.tts_fish_key = config.get("tts_fish_key", "")
+                    self.tts_local_url = config.get("tts_local_url", "http://127.0.0.1:9880")
+                    self.tts_ref_audio = config.get("tts_ref_audio", "")
+                    self.tts_emotion = config.get("tts_emotion", True)
         except Exception as e:
             print(f"加载配置失败: {e}")

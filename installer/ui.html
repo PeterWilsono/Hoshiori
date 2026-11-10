@@ -454,7 +454,7 @@
                     装好以后双击图标就能打开，不需要 Python，也不需要联网注册。
                 </p>
                 <div class="facts">
-                    <div>版本<b id="factVersion">1.3.0</b></div>
+                    <div>版本<b id="factVersion">—</b></div>
                     <div>占用空间<b id="factSize">约 130 MB</b></div>
                     <div>数据位置<b>默认不占用 C 盘</b></div>
                 </div>
@@ -548,9 +548,9 @@
                 try {
                     this.inst = await window.pywebview.api.get_defaults();
                 } catch (e) {
-                    this.inst = { version: '1.3.0', default_dir: 'D:\\Hoshiori', free_gb: 0 };
+                    this.inst = { version: '—', default_dir: 'D:\\Hoshiori', free_gb: 0 };
                 }
-                document.getElementById('factVersion').textContent = this.inst.version || '1.3.0';
+                document.getElementById('factVersion').textContent = this.inst.version || '—';
                 document.getElementById('installDir').value = this.inst.default_dir || '';
                 this.dir = this.inst.default_dir || '';
                 this.refreshSpace();

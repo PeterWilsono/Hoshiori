@@ -993,7 +993,7 @@ body.is-quitting .app-container {
     padding-left: var(--thread-x);
     display: flex;
     flex-direction: column;
-    gap: 30px;
+    gap: 12px;          /* 一轮之内贴紧；轮与轮之间靠下面那条 margin 拉开 */
     min-height: 100%;
     padding-bottom: 26px;
 }
@@ -1341,7 +1341,11 @@ body.is-ready .input-section {
     }
 
     .chat-messages {
-        gap: 26px;
+        gap: 10px;
+    }
+
+    .message-bubble.user {
+        margin-top: 20px;
     }
 
     .thread {

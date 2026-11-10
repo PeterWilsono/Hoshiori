@@ -197,6 +197,70 @@ class MemoryManager:
     
     # ========== 情绪记忆上下文构建(增强版) ==========
     
+    def build_context(self, pinned, recalled, summaries="", budget_chars=1000,
+                      timeline=None):
+        """把检索到的记忆压成一段提示词。
+
+        三条原则：
+        - 稳定事实（名字/生日/职业）单独放，每次都在场；
+        - 往事只放和这句话有关的，按检索分排序，宁少不滥；
+        - 更早的对话用摘要带过，不再塞原文。
+        - 时间线单独一小段：她得知道"这阵子"发生了什么，而不只是零散片段。
+        """
+        blocks = []
+        used = 0
+
+        def take(line):
+            nonlocal used
+            cost = len(line) + 1
+            if used + cost > budget_chars:
+                return False
+            blocks.append(line)
+            used += cost
+            return True
+
+        if pinned:
+            blocks.append("【你确实记得的事】")
+            for item in pinned:
+                if not take("- %s" % item["content"]):
+                    break
+
+        if recalled:
+            if blocks:
+                blocks.append("")
+            blocks.append("【这句话让你想起】")
+            for item in recalled:
+                stamp = item.get("time") or ""
+                prefix = (stamp + " ") if stamp else ""
+                if not take("- %s%s" % (prefix, item["content"])):
+                    break
+
+        if timeline:
+            if blocks:
+                blocks.append("")
+            blocks.append("【你们最近这些事，按时间】")
+            for item in timeline[:4]:
+                date = (item.get("date") or "")[5:]      # 只留 月-日
+                if not take("· %s %s" % (date, item["content"])):
+                    break
+
+        if summaries:
+            if blocks:
+                blocks.append("")
+            blocks.append("【更早的对话，你大致记得】")
+            for line in summaries.split("\n")[:2]:
+                line = line.strip()
+                if line and not take("· %s" % line):
+                    break
+
+        if not blocks:
+            return ""
+
+        blocks.append("")
+        blocks.append("（上面这些是你真的记得的。别一次全说出来，"
+                      "顺着话头自然提一两句就好。）")
+        return "\n".join(blocks)
+
     def build_memory_context(self, long_term_memory: Dict, recent_summary: str = "", 
                            current_pad: Dict = None) -> str:
         """

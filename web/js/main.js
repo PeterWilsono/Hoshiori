@@ -618,10 +618,23 @@ const Live2DManager = {
 
     /**
      * 开始说话的口型动画
-     * duration 是这一句音频的实际长度（秒），由后端量出来传过来。
+     * duration 是这一句音频的实际长度，单位秒（后端量出来的）。
+     * 兼容老调用：传进来的值大得像毫秒（>30）就按毫秒处理，
+     * 否则会出现「嘴张两小时」这种事故。
      */
     startTalking(duration) {
         if (!this.model) return;
+        if (typeof appState !== 'undefined' && !appState.voiceEnabled) {
+            // 没开语音就不该动嘴
+            this.stopTalking();
+            return;
+        }
+
+        let seconds = Number(duration);
+        if (!isFinite(seconds) || seconds <= 0) seconds = 2.4;
+        if (seconds > 30) seconds = seconds / 1000;     // 毫秒误传
+        seconds = Math.max(0.35, Math.min(20, seconds));
+
         clearTimeout(this.talkStopTimer);
         clearInterval(this.talkTimer);
         this.talkTimer = null;
@@ -644,15 +657,22 @@ const Live2DManager = {
         }
 
         // 兜底：万一"说完了"的通知没到，也不能一直张着嘴
-        const ms = Math.max(800, (duration || 3) * 1000);
-        this.talkStopTimer = setTimeout(() => this.stopTalking(), ms * 1.45);
+        this.talkStopTimer = setTimeout(() => this.stopTalking(), seconds * 1000 + 1500);
     },
 
     stopTalking() {
         clearTimeout(this.talkStopTimer);
+        this.talkStopTimer = null;
         clearInterval(this.talkTimer);
         this.talkTimer = null;
-        if (this.rig) this.rig.setTalking(false);
+        if (this.rig) {
+            this.rig.setTalking(false);   // 由骨架把嘴平滑收回，别和它的记账打架
+        } else {
+            const core = this.model && this.model.internalModel && this.model.internalModel.coreModel;
+            if (core && core.setParameterValueById) {
+                try { core.setParameterValueById('ParamMouthOpenY', 0); } catch (e) { }
+            }
+        }
     },
 
     updateByPAD(pad) {
@@ -874,6 +894,14 @@ async function toggleVoice() {
     try {
         const newState = await eel.toggle_voice_from_web()();
         appState.voiceEnabled = newState;
+        if (!newState) {
+            // 关语音要顺手把嘴闭上，不然会停在半张的状态
+            if (typeof Live2DManager !== 'undefined' && Live2DManager.isInitialized) {
+                Live2DManager.stopTalking();
+            }
+            const img = document.getElementById('avatarImage');
+            if (img) img.classList.remove('talking');
+        }
         showNotification(newState ? '语音已开启' : '语音已关闭', 'success', 1800);
     } catch (e) {
         console.error('Toggle voice error:', e);
@@ -929,15 +957,117 @@ function switchSettingsTab(name) {
     document.querySelectorAll('.settings-panel').forEach(panel => {
         panel.hidden = panel.dataset.panel !== name;
     });
+    if (name === 'storage') loadMemoryList();
 }
+
+// ===== 记忆面板 =====
+const MEMORY_KIND_LABEL = {
+    profile: '关于你', preference: '喜好', plan: '约定',
+    event: '经历', emotion: '情绪', topic: '话题', note: '杂记'
+};
+
+async function loadMemoryList(scope = null) {
+    const box = document.getElementById('memoryList');
+    const summary = document.getElementById('memorySummary');
+    if (!box) return;
+    try {
+        const [stats, items, bond] = await Promise.all([
+            eel.get_memory_stats()(),
+            eel.get_memories(30, scope)(),
+            eel.get_relationship_status()()
+        ]);
+        renderBond(bond);
+        if (summary) {
+            summary.textContent = stats && stats.total
+                ? `现在有 ${stats.active} 条有效记忆${stats.superseded ? `，另有 ${stats.superseded} 条旧的已失效` : ''}。删掉的那条，她就真的不记得了。`
+                : '还什么都没记住。多聊几句她就开始记了。';
+        }
+        if (!items || !items.length) {
+            box.innerHTML = '<p class="memory-empty">这里还是空的。</p>';
+            return;
+        }
+        box.innerHTML = items.map(m => {
+            const kind = MEMORY_KIND_LABEL[m.kind] || '记忆';
+            const dead = m.status && m.status !== 'active';
+            const scopeTag = m.scope === 'user'
+                ? '<span class="memory-item__scope">跨对话</span>' : '';
+            return `<div class="memory-item${dead ? ' is-dead' : ''}">
+                <span class="memory-item__kind">${escapeAudioText(kind)}</span>
+                ${scopeTag}
+                <span class="memory-item__text" title="${escapeAudioText(m.content)}">${escapeAudioText(m.content)}</span>
+                <button class="memory-item__del" type="button" title="忘掉这条"
+                        onclick="forgetMemory(${m.id})">×</button>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        console.error('读取记忆失败:', e);
+        if (summary) summary.textContent = '读取失败。';
+    }
+}
+
+/**
+ * 关系状态卡：阶段 + 心情 + 当前对话是延续还是重新认识
+ */
+function renderBond(bond) {
+    const stage = document.getElementById('bondStage');
+    const mood = document.getElementById('bondMood');
+    const hint = document.getElementById('bondHint');
+    if (!stage || !bond) return;
+
+    stage.textContent = bond.stage || '熟悉';
+    mood.textContent = bond.label || '心情平静';
+    if (hint) {
+        hint.textContent = bond.continuity === false
+            ? '这段对话是「重新认识」：关系从最初开始，也读不到跨对话的记忆。'
+            : `亲密度 ${bond.intimacy ?? '—'} / 信任 ${bond.trust ?? '—'}。换话题不会重置这些。`;
+    }
+}
+
+function setMemoryScope(scope, btn) {
+    document.querySelectorAll('.memory-chip').forEach(el => el.classList.remove('is-active'));
+    if (btn) btn.classList.add('is-active');
+    loadMemoryList(scope || null);
+}
+
+async function forgetMemory(id) {
+    try {
+        const ok = await eel.delete_memory(id)();
+        if (ok) {
+            showNotification('已经忘了这条', 'info', 1600);
+            loadMemoryList();
+        }
+    } catch (e) {
+        showNotification('删除失败', 'error');
+    }
+}
+
+async function tidyMemories() {
+    try {
+        const n = await eel.tidy_memories()();
+        showNotification(n > 0 ? `整理了 ${n} 条旧记忆` : '没有需要整理的', 'info', 2000);
+        loadMemoryList();
+    } catch (e) {
+        showNotification('整理失败', 'error');
+    }
+}
+
+window.loadMemoryList = loadMemoryList;
+window.forgetMemory = forgetMemory;
+window.tidyMemories = tidyMemories;
 
 async function openSettings() {
     try {
         document.querySelectorAll('.modal-overlay').forEach(m => m.remove());
 
         const settings = await eel.get_settings()();
-        const ttsVoices = await eel.get_tts_voices()();
-        const currentVoice = await eel.get_current_tts_voice()();
+        let ttsCatalog = { groups: [], current: '', status: {} };
+        try {
+            ttsCatalog = (await eel.get_tts_catalog()()) || ttsCatalog;
+        } catch (err) {
+            console.warn('读取语音清单失败:', err);
+        }
+        const currentVoice = ttsCatalog.current || '';
+        const ttsStatus = ttsCatalog.status || {};
         const apiPresets = await eel.get_api_presets()();
 
         let paths = {};
@@ -947,11 +1077,14 @@ async function openSettings() {
             console.warn('读取路径信息失败:', err);
         }
 
-        let voiceOptions = '';
-        for (const voice of ttsVoices) {
-            const selected = voice.id === currentVoice ? 'selected' : '';
-            voiceOptions += `<option value="${voice.id}" ${selected}>${voice.name}</option>`;
+        let buildVersion = '';
+        try {
+            buildVersion = (await eel.get_build_version()()) || '';
+        } catch (err) {
+            console.warn('读取版本号失败:', err);
         }
+
+        const voiceOptions = buildVoiceOptions(ttsCatalog, currentVoice);
 
         let providerOptions = '';
         for (const [key, preset] of Object.entries(apiPresets)) {
@@ -988,6 +1121,8 @@ async function openSettings() {
                         onclick="switchSettingsTab('daily')">日常</button>
                 <button class="settings-tab" data-tab="model" role="tab"
                         onclick="switchSettingsTab('model')">模型</button>
+                <button class="settings-tab" data-tab="voice" role="tab"
+                        onclick="switchSettingsTab('voice')">语音</button>
                 <button class="settings-tab" data-tab="storage" role="tab"
                         onclick="switchSettingsTab('storage')">存储</button>
                 <button class="settings-tab" data-tab="more" role="tab"
@@ -1020,14 +1155,65 @@ async function openSettings() {
                 </div>
 
                 <div class="form-group" style="margin-top: 18px;">
-                    <label class="form-label">声音</label>
+                    <label class="form-label">当前声音</label>
                     <div class="voice-row">
-                        <select class="form-select" id="settingTTSVoice" onchange="changeTTSVoice(this.value)">
-                            ${voiceOptions}
-                        </select>
-                        <button class="btn btn-ghost" type="button" onclick="previewTTSVoice()">试听</button>
+                        <span class="voice-current">${currentVoiceName(ttsCatalog, currentVoice)}</span>
+                        <button class="btn btn-ghost" type="button" onclick="switchSettingsTab('voice')">更换</button>
                     </div>
-                    <p class="form-hint">在线音色更自然，需要网络；系统音色离线可用，几乎瞬间出声。</p>
+                    <p class="form-hint">${ttsStatus.engine_label
+                ? `正在用「${ttsStatus.engine_label}」，${ttsStatus.emotion ? '会跟着情绪变语气' : '语气平稳'}。`
+                : '还没选过声音，去「语音」里挑一个吧。'}</p>
+                </div>
+            </div>
+
+            <div class="settings-panel" data-panel="voice" hidden>
+                <div class="switch-row">
+                    <div>
+                        <div class="switch-label">情绪朗读</div>
+                        <div class="switch-desc">开心时语调上扬、难过时放慢。「像真人」这件事，语气比音色更关键</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="settingToneSwitch" ${settings.tts_emotion !== false ? 'checked' : ''}
+                               onchange="saveVoiceConfig()">
+                        <span class="switch__thumb"></span>
+                    </label>
+                </div>
+
+                <div class="form-group" style="margin-top: 16px;">
+                    <label class="form-label">引擎与音色</label>
+                    <select class="form-select" id="settingTTSVoice" onchange="changeTTSVoice(this.value)">
+                        ${voiceOptions}
+                    </select>
+                    <p class="form-hint">灰色分组是还没配置的引擎，配好就能选。</p>
+                    <div class="settings-grid" style="margin-top: 10px;">
+                        <button class="btn btn-ghost" type="button" onclick="previewVoice('plain')">听 · 平铺直叙</button>
+                        <button class="btn btn-primary" type="button" onclick="previewVoice('emotion')">听 · 带情绪</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">千问语音 API Key</label>
+                    <input type="password" class="form-input" id="settingTTSKey" value="${settings.tts_api_key || ''}"
+                           placeholder="sk-…（阿里云百炼，和聊天模型不是同一个 Key）" autocomplete="off">
+                    <p class="form-hint">在阿里云百炼控制台开通「语音合成」，新用户送 11 万字符，约 0.8 元/万字符。
+                        填好点下面的「测试」，能念出来就说明通了。</p>
+                    <div class="settings-grid" style="margin-top: 10px;">
+                        <button class="btn btn-ghost" type="button" onclick="saveVoiceConfig(true)">保存 Key</button>
+                        <button class="btn btn-outline" type="button" onclick="testVoiceKey()">测试 Key</button>
+                    </div>
+                    <p class="form-hint" id="ttsKeyStatus"></p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">本地语音服务（可选，离线）</label>
+                    <div class="voice-row">
+                        <input type="text" class="form-input" id="settingTTSLocal" value="${settings.tts_local_url || ''}"
+                               placeholder="http://127.0.0.1:9880">
+                        <button class="btn btn-ghost" type="button" onclick="checkLocalTTS()">检测</button>
+                    </div>
+                    <p class="form-hint">支持 IndexTTS2、Qwen3-TTS 本地版、Breeze TTS 2、GPT-SoVITS 等在本机开的 HTTP 服务。
+                        检测到之后，上面的列表会多出「本地大模型」一组，声音不限量、也不花钱。</p>
+                    <p class="form-hint" id="ttsLocalStatus"></p>
                 </div>
             </div>
 
@@ -1116,6 +1302,34 @@ async function openSettings() {
                     <span class="label">程序位置</span>
                     <span class="meta-row__value path-ellipsis" title="${paths.app_dir || ''}">${paths.app_dir || '—'}</span>
                 </div>
+
+                <div class="bond-card">
+                    <div class="bond-card__head">
+                        <span class="bond-card__label">你们现在</span>
+                        <span class="bond-card__stage" id="bondStage">—</span>
+                        <span class="bond-card__dot">·</span>
+                        <span class="bond-card__mood" id="bondMood">—</span>
+                    </div>
+                    <p class="bond-card__hint" id="bondHint"></p>
+                </div>
+
+                <div class="form-group" style="margin-top: 18px;">
+                    <label class="form-label">她记得的事</label>
+                    <p class="form-hint" id="memorySummary">读取中…</p>
+                    <div class="memory-filter" id="memoryFilter">
+                        <button class="memory-chip is-active" type="button"
+                                onclick="setMemoryScope(null, this)">全部</button>
+                        <button class="memory-chip" type="button"
+                                onclick="setMemoryScope('user', this)">她一直记得</button>
+                        <button class="memory-chip" type="button"
+                                onclick="setMemoryScope('conv', this)">这段对话</button>
+                    </div>
+                    <div id="memoryList" class="memory-list"></div>
+                    <div class="settings-grid" style="margin-top: 10px;">
+                        <button class="btn btn-ghost" type="button" onclick="loadMemoryList()">刷新</button>
+                        <button class="btn btn-ghost" type="button" onclick="tidyMemories()">整理失效记忆</button>
+                    </div>
+                </div>
             </div>
 
             <div class="settings-panel" data-panel="more" hidden>
@@ -1125,7 +1339,7 @@ async function openSettings() {
                 </div>
                 <div class="meta-row">
                     <span class="label">版本</span>
-                    <span class="meta-row__value">Hoshiori 1.2</span>
+                    <span class="meta-row__value">Hoshiori ${buildVersion || '—'}</span>
                 </div>
                 <div class="meta-row">
                     <span class="label">数据</span>
@@ -1477,22 +1691,141 @@ window.openThemeSelector = () => themeManager.openSelector();
 window.openModelSelector = openModelSelector;
 window.selectLive2DModel = selectLive2DModel;
 async function previewTTSVoice() {
-    try {
-        if (!appState.voiceEnabled) {
-            // 试听时临时开一下，试听完再关回去
-            await eel.preview_tts_voice(null)();
-        } else {
-            const current = document.getElementById('settingTTSVoice');
-            await eel.preview_tts_voice(current ? current.value : null)();
+    return previewVoice('emotion');
+}
+
+/* ---------- 语音设置：引擎 / Key / 本地服务 ---------- */
+
+function escapeAudioText(str) {
+    return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* 引擎简称：下拉框收起时只想看一行字，得能一眼认出是哪个引擎 */
+const ENGINE_SHORT = {
+    qwen: '千问', local: '本地', fish: 'Fish', baidu: '百度', sapi: '系统'
+};
+
+/**
+ * 把语音清单按引擎分组渲染成 optgroup
+ * 未配置的引擎分组置灰，用户一眼就知道该去填哪个 Key
+ */
+function buildVoiceOptions(catalog, current) {
+    if (!catalog || !catalog.groups || !catalog.groups.length) {
+        return '<option value="auto">暂无可用的语音引擎</option>';
+    }
+    let html = '';
+    for (const group of catalog.groups) {
+        const dis = group.available ? '' : 'disabled';
+        const suffix = group.available ? '' : ` · ${group.hint || '未配置'}`;
+        const short = ENGINE_SHORT[group.engine] || group.label;
+        html += `<optgroup label="${escapeAudioText(group.label + suffix)}" ${dis}>`;
+        for (const voice of group.voices) {
+            const selected = voice.id === current ? 'selected' : '';
+            const text = `${short} · ${voice.name}`;
+            html += `<option value="${escapeAudioText(voice.id)}" ${selected}>${escapeAudioText(text)}</option>`;
         }
-        showNotification('正在试听', 'info');
-    } catch (e) {
-        console.error('试听失败:', e);
+        html += '</optgroup>';
+    }
+    return html;
+}
+
+function currentVoiceName(catalog, currentId) {
+    if (!catalog || !catalog.groups) return '未选择';
+    for (const group of catalog.groups) {
+        for (const voice of group.voices) {
+            if (voice.id === currentId) {
+                return `${ENGINE_SHORT[group.engine] || group.label} · ${voice.name}`;
+            }
+        }
+    }
+    return currentId || '未选择';
+}
+
+/**
+ * 保存语音配置后重开设置页，让分组状态（灰/亮）立刻刷新
+ */
+async function saveVoiceConfig(showToast) {
+    const keyEl = document.getElementById('settingTTSKey');
+    const localEl = document.getElementById('settingTTSLocal');
+    const toneEl = document.getElementById('settingToneSwitch');
+    try {
+        const res = await eel.save_tts_config({
+            api_key: keyEl ? keyEl.value : undefined,
+            local_url: localEl ? localEl.value : undefined,
+            emotion: toneEl ? toneEl.checked : undefined,
+        })();
+        if (!res || !res.ok) {
+            showNotification((res && res.error) || '保存失败', 'error', 2600);
+            return null;
+        }
+        if (showToast) showNotification('已保存', 'success', 1800);
+        if (showToast) {
+            closeModal(document.querySelector('.modal-overlay'));
+            setTimeout(openSettings, 220);
+        }
+        return res;
+    } catch (err) {
+        console.error('保存语音配置失败:', err);
+        showNotification('保存失败', 'error');
+        return null;
+    }
+}
+
+async function testVoiceKey() {
+    const status = document.getElementById('ttsKeyStatus');
+    if (status) status.textContent = '正在合成一句话，稍等…';
+    await saveVoiceConfig(false);
+    try {
+        const res = await eel.test_tts_key()();
+        if (res && res.ok) {
+            if (status) status.textContent = '✓ Key 可用，已经能出声了。';
+        } else {
+            if (status) status.textContent = `✗ ${(res && res.error) || '测试失败'}`;
+        }
+    } catch (err) {
+        if (status) status.textContent = '✗ 测试失败';
+    }
+}
+
+async function checkLocalTTS() {
+    const status = document.getElementById('ttsLocalStatus');
+    if (status) status.textContent = '正在探测本地服务…';
+    await saveVoiceConfig(false);
+    try {
+        const res = await eel.test_tts_local()();
+        if (res && res.ok) {
+            if (status) status.textContent = `✓ 已连接：${res.info || res.url}`;
+            showNotification('本地语音服务已连接', 'success', 2000);
+        } else {
+            if (status) status.textContent = `✗ 没有响应（${(res && res.url) || '地址为空'}）。确认服务已经启动，端口对得上。`;
+        }
+    } catch (err) {
+        if (status) status.textContent = '✗ 探测失败';
+    }
+}
+
+async function previewVoice(mode) {
+    try {
+        const select = document.getElementById('settingTTSVoice');
+        if (select && select.value) {
+            // 试听前先切过去，否则听到的还是上一个声音
+            await eel.set_tts_voice(select.value)();
+        }
+        await eel.preview_tts(mode === 'emotion' ? 'emotion' : 'normal')();
+        showNotification(mode === 'emotion' ? '正在试听 · 带情绪' : '正在试听 · 平铺直叙', 'info', 2000);
+    } catch (err) {
+        console.error('试听失败:', err);
         showNotification('试听失败', 'error');
     }
 }
 
 window.previewTTSVoice = previewTTSVoice;
+window.previewVoice = previewVoice;
+window.saveVoiceConfig = saveVoiceConfig;
+window.testVoiceKey = testVoiceKey;
+window.checkLocalTTS = checkLocalTTS;
 
 window.changeTTSVoice = changeTTSVoice;
 window.openDataDir = openDataDir;

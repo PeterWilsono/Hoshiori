@@ -18,6 +18,12 @@ from datetime import datetime
 import app_paths
 import boot
 import window_shell
+import document_reader
+
+try:
+    from version import VERSION as BUILD_VERSION   # 项目根目录唯一版本来源
+except Exception:
+    BUILD_VERSION = "0.0.0"
 
 
 # ⭐ 全局版本号 - 使用时间戳确保每次启动都是新版本
@@ -116,6 +122,11 @@ class WebBridge:
         def get_app_version():
             """获取应用版本号（用于缓存破坏）"""
             return APP_VERSION
+
+        @eel.expose
+        def get_build_version():
+            """真实的产品版本号（设置页显示用，不是缓存用的时间戳）"""
+            return BUILD_VERSION
         
         @eel.expose
         def get_current_theme():
@@ -204,6 +215,7 @@ class WebBridge:
             """获取当前对话"""
             try:
                 conv_id = self.app.conversation_manager.current_conversation_id
+                self.app.conversation_manager._ensure_messages_loaded(conv_id)
                 conv = self.app.conversation_manager.conversations.get(conv_id, {})
                 
                 # 清理消息内容（移除JSON块）
@@ -241,8 +253,10 @@ class WebBridge:
                         'id': str(conv_id),
                         'title': _display_title(conv_data),
                         'timestamp': _to_epoch(conv_data.get('last_interaction_time')),
-                        'message_count': len(conv_data.get('messages', [])),
-                        'is_current': conv_id == current_id
+                        'message_count': conv_data.get(
+                            'message_count', len(conv_data.get('messages', []))),
+                        'is_current': conv_id == current_id,
+                        'continuity': bool(conv_data.get('continuity', 1))
                     })
 
                 # 按时间倒序排序
@@ -266,14 +280,19 @@ class WebBridge:
                 return False
         
         @eel.expose
-        def new_conversation_from_web():
-            """新建对话"""
+        def new_conversation_from_web(continuity=True):
+            """新建对话。
+
+            continuity=True：延续你们的关系和记忆，只是换个话题；
+            continuity=False：重新认识，关系回到陌生人，也读不到跨对话的记忆。
+            """
             try:
-                self.app.new_conversation()
-                return True
+                conv_id = self.app.new_conversation(continuity=bool(continuity))
+                return {'success': True, 'conv_id': conv_id,
+                        'continuity': bool(continuity)}
             except Exception as e:
                 print(f"新建对话错误: {e}")
-                return False
+                return {'success': False, 'error': str(e)}
         
         @eel.expose
         def delete_conversation_from_web(conv_id):
@@ -384,6 +403,72 @@ class WebBridge:
             return True
 
         # ===== 存储位置 =====
+        @eel.expose
+        def get_memory_stats():
+            """记忆条数（设置页显示）"""
+            try:
+                store = self.app.conversation_manager.memory_store
+                return store.stats()
+            except Exception as e:
+                print(f"读取记忆统计失败: {e}")
+                return {"total": 0, "active": 0, "superseded": 0}
+
+        @eel.expose
+        def get_memories(limit=24, scope=None):
+            """她记得的事。
+
+            scope=None  → 这段对话能看到的全部（含跨对话的）
+            scope='user'→ 只列跨对话的（"她本来就知道的"）
+            scope='conv'→ 只列这段对话的
+            """
+            try:
+                cm = self.app.conversation_manager
+                # 「重新认识」的对话看不到跨对话记忆，面板也别列出来——
+                # 否则界面上写着"她不记得"，下面却摆着一条条旧事。
+                if scope is None and 'user' not in cm.memory_scopes():
+                    scope = 'conv'
+                return cm.memory_store.list_recent(
+                    cm.current_conversation_id, limit=int(limit),
+                    include_superseded=True, scope=scope)
+            except Exception as e:
+                print(f"读取记忆失败: {e}")
+                return []
+
+        @eel.expose
+        def get_relationship_status():
+            """心情、关系阶段、当前对话是否延续——给界面显示。"""
+            try:
+                cm = self.app.conversation_manager
+                info = cm.mood_summary()
+                core = cm.get_psych_state() or {}
+                rel = core.get('relationship') or {}
+                info['intimacy'] = int(rel.get('intimacy', 50))
+                info['trust'] = int(rel.get('trust', 50))
+                return info
+            except Exception as e:
+                print(f"读取关系状态失败: {e}")
+                return {'label': '', 'stage': '熟悉', 'continuity': True}
+
+        @eel.expose
+        def delete_memory(mem_id):
+            """手动删掉一条记忆（她会真的忘记）"""
+            try:
+                self.app.conversation_manager.memory_store.forget(int(mem_id))
+                return True
+            except Exception as e:
+                print(f"删除记忆失败: {e}")
+                return False
+
+        @eel.expose
+        def tidy_memories():
+            """把长期没用、又不重要的记忆归档（可恢复，不删除）"""
+            try:
+                n = self.app.conversation_manager.memory_store.prune()
+                return n
+            except Exception as e:
+                print(f"整理记忆失败: {e}")
+                return 0
+
         @eel.expose
         def get_app_paths():
             """当前程序位置 / 数据位置，给设置面板显示"""
@@ -534,15 +619,112 @@ class WebBridge:
             """当前语音状态（给设置页显示用）"""
             try:
                 mgr = self.app.tts_manager
-                return {
-                    'enabled': bool(self.app.voice_enabled),
-                    'voice_id': mgr.voice_id,
-                    'engine': mgr.get_engine_label(),
-                    'online_ok': mgr._baidu_ok is not False,
-                }
+                status = mgr.get_status()
+                status['enabled'] = bool(self.app.voice_enabled)
+                return status
             except Exception as e:
                 print(f"获取语音状态错误: {e}")
-                return {'enabled': False, 'voice_id': '', 'engine': '', 'online_ok': False}
+                return {'enabled': False, 'voice_id': '', 'engine': '', 'engine_label': '',
+                        'emotion': True, 'qwen_ok': False, 'local_ok': False, 'baidu_ok': False}
+
+        @eel.expose
+        def get_tts_catalog():
+            """按引擎分组的音色清单（含「为什么不能用」的提示）"""
+            try:
+                mgr = self.app.tts_manager
+                return {
+                    'groups': mgr.get_voice_catalog(),
+                    'current': mgr.voice_id,
+                    'status': mgr.get_status(),
+                }
+            except Exception as e:
+                print(f"获取语音清单错误: {e}")
+                return {'groups': [], 'current': '', 'status': {}}
+
+        @eel.expose
+        def save_tts_config(payload):
+            """保存语音引擎配置：Key、本地服务地址、情绪开关"""
+            try:
+                mgr = self.app.tts_manager
+                cm = self.app.config_manager
+                changed = []
+
+                api_key = (payload.get('api_key') or '').strip()
+                if api_key != (cm.tts_api_key or ''):
+                    cm.tts_api_key = api_key
+                    mgr._qwen.fatal = False
+                    if api_key:
+                        changed.append('千问')
+
+                fish_key = payload.get('fish_key')
+                if fish_key is not None:
+                    cm.tts_fish_key = (fish_key or '').strip()
+
+                local_url = payload.get('local_url')
+                if local_url is not None:
+                    cm.tts_local_url = (local_url or '').strip()
+                    mgr._local.proto = None
+                    mgr._local.checked_at = 0.0
+
+                if payload.get('ref_audio') is not None:
+                    cm.tts_ref_audio = (payload['ref_audio'] or '').strip()
+
+                if payload.get('emotion') is not None:
+                    mgr.set_emotion_enabled(bool(payload['emotion']))
+
+                cm.save_config()
+
+                # 刚填了千问的 Key：顺手把音色切过去，用户马上就能听到差别
+                if mgr._qwen.available and mgr.engine_name in ('baidu', 'auto', 'sapi'):
+                    mgr.set_voice('qwen:Serena')
+                if mgr._local.base() and not mgr._local.available:
+                    mgr._local.probe()
+
+                return {'ok': True, 'changed': changed, 'status': mgr.get_status()}
+            except Exception as e:
+                print(f"保存语音配置失败: {e}")
+                return {'ok': False, 'error': str(e)}
+
+        @eel.expose
+        def test_tts_key():
+            """真的合成一句来验证 Key（不是只看长度）"""
+            try:
+                return self.app.tts_manager.test_qwen()
+            except Exception as e:
+                return {'ok': False, 'error': str(e)}
+
+        @eel.expose
+        def test_tts_local():
+            """检测本地大模型语音服务"""
+            try:
+                return self.app.tts_manager.probe_local()
+            except Exception as e:
+                return {'ok': False, 'error': str(e), 'info': ''}
+
+        @eel.expose
+        def preview_tts(mode='normal'):
+            """试听：mode=emotion 时用角色当前情绪念，方便对比"""
+            try:
+                mgr = self.app.tts_manager
+                was_emotion = mgr.emotion_enabled
+                if mode == 'normal':
+                    mgr.emotion_enabled = False
+                    sample = '你好呀，我是星织。这样平着念，是不是就有点闷？'
+                else:
+                    mgr.emotion_enabled = True
+                    if not mgr.get_mood_tag():
+                        mgr.set_mood('joy', {'pleasure': 0.8, 'arousal': 0.6, 'dominance': 0.2})
+                    sample = '你好呀，我是星织！今天见到你，真的很开心呢。'
+
+                was = mgr.is_enabled
+                mgr.is_enabled = True
+                mgr.speak(sample)
+                mgr.is_enabled = was
+                mgr.emotion_enabled = was_emotion
+                return True
+            except Exception as e:
+                print(f"试听失败: {e}")
+                return False
         
         # ===== 模型模式相关 =====
         @eel.expose
@@ -573,7 +755,17 @@ class WebBridge:
                 provider = self.app.config_manager.api_provider
                 thinking_mode = self.app.config_manager.thinking_mode
                 web_search = self.app.config_manager.web_search_enabled
-                
+
+                def tts_fields():
+                    """语音相关配置（和模型 API Key 分开存，互不干扰）"""
+                    cm = self.app.config_manager
+                    return {
+                        'tts_api_key': getattr(cm, 'tts_api_key', ''),
+                        'tts_fish_key': getattr(cm, 'tts_fish_key', ''),
+                        'tts_local_url': getattr(cm, 'tts_local_url', ''),
+                        'tts_emotion': bool(getattr(cm, 'tts_emotion', True)),
+                    }
+
                 if mode == "local":
                     return {
                         'model_mode': 'local',
@@ -582,7 +774,8 @@ class WebBridge:
                         'web_search_enabled': False,
                         'api_endpoint': self.app.config_manager.local_api_endpoint,
                         'api_key': self.app.config_manager.local_api_key,
-                        'model': self.app.config_manager.local_model
+                        'model': self.app.config_manager.local_model,
+                        **tts_fields(),
                     }
                 else:
                     return {
@@ -592,7 +785,8 @@ class WebBridge:
                         'web_search_enabled': web_search,
                         'api_endpoint': self.app.config_manager.online_api_endpoint,
                         'api_key': self.app.config_manager.online_api_key,
-                        'model': self.app.config_manager.online_model
+                        'model': self.app.config_manager.online_model,
+                        **tts_fields(),
                     }
             except Exception as e:
                 print(f"获取设置错误: {e}")
@@ -742,10 +936,7 @@ class WebBridge:
                 file_path = filedialog.askopenfilename(
                     parent=root,
                     title="选择文件",
-                    filetypes=[
-                        ("文本文件", "*.txt;*.md;*.log;*.py;*.js;*.html;*.css;*.json"),
-                        ("所有文件", "*.*")
-                    ]
+                    filetypes=document_reader.FILETYPES
                 )
                 
                 root.destroy()
@@ -756,24 +947,32 @@ class WebBridge:
                 
                 print(f"✅ 选择了文件: {file_path}")
                 file_name = os.path.basename(file_path)
-                
-                # 读取文件内容
+
+                # Word / Excel / PPT / PDF 走文档解析，纯文本走编码探测
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                except UnicodeDecodeError:
-                    # 尝试其他编码
-                    print("⚠️ UTF-8解码失败，尝试GBK编码...")
-                    with open(file_path, 'r', encoding='gbk') as f:
-                        content = f.read()
-                
-                print(f"✅ 文件读取成功: {file_name} ({len(content)} 字符)")
-                
+                    doc = document_reader.read_document(file_path)
+                except document_reader.DocumentError as exc:
+                    print("❌ 文档读取失败: %s" % exc)
+                    return {
+                        'success': False,
+                        'filename': file_name,
+                        'error': str(exc),
+                    }
+
+                content = doc['text']
+                print("✅ 文件读取成功: %s · %s · %d 字符%s" % (
+                    file_name, doc['kind'], len(content),
+                    "（已截断）" if doc['truncated'] else ''))
+
                 return {
                     'success': True,
                     'filename': file_name,
                     'content': content,
-                    'char_count': len(content)
+                    'char_count': len(content),
+                    'kind': doc['kind'],
+                    'truncated': doc['truncated'],
+                    'original_chars': doc['original_chars'],
+                    'warning': doc['warning'],
                 }
             except Exception as e:
                 error_msg = f"文件上传错误: {e}"
@@ -827,6 +1026,12 @@ class WebBridge:
     def update_ai_response(self, content):
         """更新AI回复到Web"""
         self.send_to_web('receiveAIResponse', content)
+
+    def append_ai_response(self, extra):
+        """把一小段补充（比如结尾的 emoji）接到上一条气泡后面"""
+        if not extra:
+            return
+        self.send_to_web('appendAIResponse', extra)
     
     def update_avatar(self, mood):
         """更新立绘"""
@@ -1091,6 +1296,7 @@ JS_CALLBACKS = (
     'startAvatarTalking',
     'stopAvatarTalking',
     'receiveAIResponse',
+    'appendAIResponse',
     'applyThemeFromPython',
 )
 

@@ -26,7 +26,10 @@ import zipfile
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
 BUILD = os.path.join(ROOT, "build")
-VERSION = "1.4.0"
+
+sys.path.insert(0, ROOT)
+from version import VERSION  # noqa: E402  版本号唯一来源
+
 APP = "Hoshiori"
 
 COMMON_ARGS = [
@@ -35,6 +38,19 @@ COMMON_ARGS = [
     "--name", APP,
     "--icon", os.path.join(ROOT, "app_icon.ico"),
     "--add-data", os.path.join(ROOT, "web") + os.pathsep + "web",
+    # 本地语义模型（bge-small-zh 量化版，24MB）：只读资源，随包发出去
+    "--add-data", os.path.join(ROOT, "models", "bge-small-zh")
+    + os.pathsep + os.path.join("models", "bge-small-zh"),
+    # version.py 是在 try/except 里导入的，PyInstaller 的静态分析找不到它，
+    # 不显式声明的话，打包后 import 会失败、版本号退回兜底值
+    "--hidden-import", "version",
+    # 语义检索是可选能力：embedder 在 try/except 里导入，静态分析同样看不到
+    "--hidden-import", "embedder",
+    "--hidden-import", "bert_tokenizer",
+    "--hidden-import", "safety",
+    "--hidden-import", "onnxruntime",
+    "--hidden-import", "onnxruntime.capi._pybind_state",
+    "--collect-binaries", "onnxruntime",
     # eel 的服务端组件都是延迟导入的，PyInstaller 静态分析看不到
     "--hidden-import", "eel",
     "--hidden-import", "bottle",
@@ -51,21 +67,46 @@ COMMON_ARGS = [
     "--collect-all", "webview",
     "--collect-all", "pythonnet",
     "--collect-all", "clr_loader",
-    # 这些库本项目不用，带上会让包大一圈
+    # 这些库本项目不用，带上会让包大一圈（numpy 现在要留着，语义模型靠它）。
+    # torch 是重点：一旦 numpy 被包含，PyInstaller 会顺着某些 hook 把它整个拖进来，
+    # 单它一个就 260MB。项目只跑 ONNX，不需要它。
+    "--exclude-module", "torch",
+    "--exclude-module", "torchvision",
+    "--exclude-module", "torchaudio",
+    "--exclude-module", "transformers",
     "--exclude-module", "matplotlib",
-    "--exclude-module", "numpy",
     "--exclude-module", "pandas",
+    "--exclude-module", "scipy",
+    "--exclude-module", "sklearn",
+    "--exclude-module", "numba",
+    "--exclude-module", "llvmlite",
+    # 本机 site-packages 里躺着一份坏掉的 tensorflow（版本号读不出来），
+    # 它的 hook 一被加载就抛异常，整个打包直接失败。项目根本不用它，排掉。
+    "--exclude-module", "tensorflow",
+    "--exclude-module", "tensorflow_estimator",
+    "--exclude-module", "tensorflow_io_gcs_filesystem",
+    "--exclude-module", "keras",
 ]
 
 
 def run_pyinstaller(mode):
     # 两种模式的中间产物必须分开放：共用 workpath 时后一次会撞上被占用的 PYZ-00.pyz
     args = [sys.executable, "-m", "PyInstaller"] + COMMON_ARGS
+    spec_dir = os.path.join(BUILD, "spec-" + mode)
     args += [
         "--distpath", DIST,
         "--workpath", os.path.join(BUILD, "work-" + mode),
-        "--specpath", os.path.join(BUILD, "spec-" + mode),
+        "--specpath", spec_dir,
     ]
+
+    # PyInstaller 生成 spec 时会覆盖同名文件；某些安全软件/沙箱会拦住这个覆盖，
+    # 直接报 PermissionError。先自己删掉，让它新建。
+    stale_spec = os.path.join(spec_dir, APP + ".spec")
+    if os.path.exists(stale_spec):
+        try:
+            os.remove(stale_spec)
+        except OSError as exc:
+            print("⚠️ 删不掉旧 spec（%s），继续尝试" % exc)
 
     if mode == "onefile":
         args += ["--onefile", "--splash", os.path.join(ROOT, "splash.png")]
@@ -129,6 +170,7 @@ def build_installer():
         "--add-data", zip_path + os.pathsep + ".",
         "--paths", ROOT,
         "--hidden-import", "app_install",
+        "--hidden-import", "version",
         "--collect-all", "webview",
         "--collect-all", "pythonnet",
         "--collect-all", "clr_loader",

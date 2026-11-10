@@ -11,14 +11,68 @@
 """
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Any  # ⭐ 添加这行导入
 import random
 from memory_manager import MemoryManager
+from memory_store import MemoryStore
+from conversation_store import ConversationStore
+from emotion_engine import EmotionEngine
 from emotion_analyzer import EmotionAnalyzer  # ⭐ 新增
 from vector_memory import DynamicMemoryGraph  # ⭐ 新增
 from cognitive_system import CognitiveEnhancementSystem  # ⭐ Phase 2
 from autonomous_system import AutonomousIntelligenceSystem  # ⭐ Phase 3
+
+#: 她的性格底色。换对话不换人格——只有"认识你多久"会变。
+DEFAULT_PERSONALITY = {
+    "openness": 0.7,
+    "conscientiousness": 0.6,
+    "extraversion": 0.5,
+    "agreeableness": 0.8,
+    "neuroticism": 0.4,
+}
+
+#: 陌生人状态。只有"重新认识"的对话才从这里开始。
+INITIAL_RELATIONSHIP = {"trust": 50, "intimacy": 50, "stress": 0}
+
+#: 关系阶段：由亲密度派生，用来约束称呼、主动程度和边界感。
+STAGES = ((30, "初识"), (45, "熟悉"), (65, "亲近"), (101, "依赖"))
+
+#: 一句话短成这样、又没有情绪词，就当寒暄处理：不检索往事，只带固定事实。
+#: 省下的不是那 2ms 检索时间，是注入提示词的两三百字。
+_LIGHT_MAX = 5
+_EMOTION_WORDS = re.compile(r"累|烦|难过|开心|生气|焦虑|压力|哭|委屈|孤单|害怕|想|爱|恨|死|疼|病")
+
+#: 发送窗格：攒到 HARD_CAP 条才整体前移一次，前移后只留 SOFT_KEEP 条。
+#: 数字大一点意味着"跳窗"更少（缓存命中更多），代价是单轮输入更长；
+#: 44/26 是在 2600 token 预算下测出来的折中。
+HIST_HARD_CAP = 44
+HIST_SOFT_KEEP = 26
+
+
+def stage_of(intimacy):
+    for edge, name in STAGES:
+        if intimacy < edge:
+            return name
+    return "依赖"
+
+
+def _mood_label(mood):
+    """把 PAD 翻成一句人话，给提示词和界面用。"""
+    p = float((mood or {}).get("pleasure", 0))
+    a = float((mood or {}).get("arousal", 0))
+    if p >= 0.35 and a >= 0.2:
+        return "心情不错，有点雀跃"
+    if p >= 0.35:
+        return "心情挺好"
+    if p <= -0.35 and a >= 0.15:
+        return "有点烦躁，容易急"
+    if p <= -0.35:
+        return "有点低落，提不起劲"
+    if a <= -0.25:
+        return "懒懒的，没什么精神"
+    return "心情平静"
 
 
 class ConversationManager:
@@ -26,13 +80,28 @@ class ConversationManager:
     def __init__(self, save_dir="baocun", builtin_role_prompt=""):
         self.save_dir = save_dir
         self.conversations_path = os.path.join(save_dir, "conversations.json")
+        self.db_path = os.path.join(save_dir, "hoshiori.db")
         self.builtin_role_prompt = builtin_role_prompt
         self.conversations = {}
         self.current_conversation_id = None
-        
-        # 初始化记忆管理器
+
+        # ⭐ 新的存储层：对话/消息/记忆都落 SQLite，不再整份重写 JSON
+        self.conv_store = ConversationStore(self.db_path)
+        self.memory_store = MemoryStore(self.db_path)
+
+        # 语义检索是可选增强：模型和旧记忆的向量在后台补，不挡启动。
+        # 补完之前 recall 只有关键词那一路，结果一样能用。
+        try:
+            self.memory_store.warm_up_async()
+        except Exception as exc:
+            print(f"⚠️ 语义索引启动失败: {exc}")
+
+        # 初始化记忆管理器（保留旧的抽取/压缩工具，供兼容与摘要使用）
         self.memory_manager = MemoryManager(max_tokens=3000)
-        
+
+        # ⭐ 情绪引擎：评价 → 情绪 → PAD → 回归基线
+        self.emotion_engine = EmotionEngine()
+
         # ⭐ Phase 1: 情绪分析器
         self.emotion_analyzer = EmotionAnalyzer()
         
@@ -47,6 +116,10 @@ class ConversationManager:
         
         # ⭐ 新增:情绪历史(用于检测情绪过载)
         self.emotion_history = []  # 最近的PAD状态历史
+
+        # 发送窗格的起点（消息下标）。只在攒够一批时整体前移一次，
+        # 这样两次前移之间发给模型的 messages 前缀完全一样，缓存才吃得到。
+        self._hist_offset = 0
         
         # ⭐ Phase 2: 对话轮次计数
         self.turns_since_last_initiative = 0
@@ -298,90 +371,76 @@ class ConversationManager:
                 conv['offline_life_pending'] = offline_life
                 print(f"🌟 生成离线生活: {offline_life}")
         
-        # 原有的衰减逻辑
-        if hours_passed > 1:
+        # 情绪按半衰期回到她自己的基线（而不是一律归零）
+        if hours_passed > 0.25:
             core = conv['psych_core']
-            state = core['state']
-            
-            decay_factor = max(0, 1 - (hours_passed * 0.1))
-            
-            state['arousal'] *= decay_factor
-            
-            if state['pleasure'] > 0:
-                state['pleasure'] = max(0, state['pleasure'] * (decay_factor + 0.3))
-            else:
-                state['pleasure'] = min(0, state['pleasure'] * (decay_factor + 0.3))
-            
-            core['relationship']['stress'] = max(0, core['relationship']['stress'] * decay_factor)
-            
-            print(f"⏰ 应用时间衰减: 已过 {hours_passed:.1f} 小时")
-            self.save_conversations()
+
+            # 关系与心情是用户级的：先从全局取最新的，再衰减，最后写回
+            if self.is_continuity():
+                try:
+                    us = self.conv_store.get_user_state() or {}
+                    if us.get('relationship'):
+                        core['relationship'] = us['relationship']
+                    if us.get('mood'):
+                        core['mood'] = us['mood']
+                except Exception:
+                    pass
+
+            try:
+                changed = self.emotion_engine.relax_by_time(core, hours_passed)
+                if changed:
+                    print(f"⏰ 情绪回落: 已过 {hours_passed:.1f} 小时 → "
+                          f"P={core['state']['pleasure']:.2f} A={core['state']['arousal']:.2f}")
+                if self.is_continuity():
+                    self._sync_user_state(core)
+                if changed:
+                    self.save_conversations()
+            except Exception as e:
+                print(f"⚠️ 情绪回落失败: {e}")
     
-    def update_psych_state(self, updates):
-        """更新厚壳心理数据 - 增强版(加入情绪历史)"""
+    def update_psych_state(self, updates, user_text="", analyzer_result=None):
+        """更新心理状态：评价 → 情绪 → PAD → 回归基线（并顺手记下强情绪）。"""
         if not self.current_conversation_id:
             return None
         
         conv = self.conversations[self.current_conversation_id]
         core = conv['psych_core']
         
-        # 更新 PAD 值
-        if 'pad_delta' in updates:
-            delta = updates['pad_delta']
-            state = core['state']
-            
-            # ⭐ 记录更新前的状态到历史
-            self.emotion_history.append(state.copy())
-            if len(self.emotion_history) > 10:
-                self.emotion_history = self.emotion_history[-10:]  # 只保留最近10次
-            
-            state['pleasure'] = max(-1.0, min(1.0, state['pleasure'] + delta.get('p', 0)))
-            state['arousal'] = max(-1.0, min(1.0, state['arousal'] + delta.get('a', 0)))
-            state['dominance'] = max(-1.0, min(1.0, state['dominance'] + delta.get('d', 0)))
+        # 记录更新前的状态到历史（情绪过载检测要用）
+        self.emotion_history.append(dict(core.get('state') or {}))
+        if len(self.emotion_history) > 10:
+            self.emotion_history = self.emotion_history[-10:]
         
-        # 更新关系参数
-        if 'relationship_delta' in updates:
-            rel_delta = updates['relationship_delta']
-            rel = core['relationship']
-            
-            rel['trust'] = max(0, min(100, rel['trust'] + rel_delta.get('trust', 0)))
-            rel['intimacy'] = max(0, min(100, rel['intimacy'] + rel_delta.get('intimacy', 0)))
-            rel['stress'] = max(0, min(100, rel['stress'] + rel_delta.get('stress', 0)))
+        info = self.emotion_engine.update(
+            core,
+            appraisal=updates.get('appraisal'),
+            user_text=user_text,
+            analyzer_result=analyzer_result,
+            explicit_delta=updates.get('pad_delta'),
+        )
+        self._last_emotion_info = info
         
-        # 如果情绪强烈,记录到情感事件
-        if abs(core['state']['arousal']) > 0.6:
-            if 'internal_monologue' in updates:
-                importance = self.memory_manager.calculate_importance(
-                    "emotional_event",
-                    core['state']
-                )
-                
-                event = {
-                    "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "event": updates.get('internal_monologue', ''),
-                    "pad_snapshot": core['state'].copy(),  # ⭐ 存储PAD快照
-                    "importance": importance
-                }
-                
-                if 'memory' not in conv:
-                    conv['memory'] = {
-                        "emotional_events": [],
-                        "user_profile": {},
-                        "long_term_summaries": [],
-                        "relationship_history": [],
-                        "discussed_topics": [],
-                        "important_events": []
-                    }
-                
-                conv['memory']['emotional_events'].append(event)
-                
-                # 只保留重要性>=5的事件,或最近20条
-                events = conv['memory']['emotional_events']
-                important_events = [e for e in events if e.get('importance', 0) >= 5]
-                recent_events = events[-20:]
-                
-                all_events = {json.dumps(e, ensure_ascii=False): e for e in important_events + recent_events}
-                conv['memory']['emotional_events'] = list(all_events.values())[-30:]
+        if updates.get('relationship_delta'):
+            self.emotion_engine.update_relationship(core, updates['relationship_delta'])
+        
+        # 强情绪事件进记忆库：记住的是"为什么"，不只是"有多强"
+        top_intensity = max(info['emotions'].values()) if info['emotions'] else 0
+        if top_intensity >= 0.45:
+            reason = (updates.get('internal_monologue') or '').strip()
+            if reason:
+                mood = max(info['emotions'].items(), key=lambda kv: kv[1])[0]
+                try:
+                    self.memory_store.remember(
+                        reason,
+                        kind='emotion',
+                        conv_id=self.current_conversation_id,
+                        importance=5.5 + top_intensity * 3,
+                        pad=core['state'],
+                        confidence=0.7,
+                        scope=self._memory_scope(),
+                    )
+                except Exception as e:
+                    print(f"⚠️ 情绪记忆写入失败: {e}")
         
         # 更新最后交互时间
         conv['last_interaction_time'] = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -389,7 +448,11 @@ class ConversationManager:
         # ⭐ 清除已使用的离线生活状态
         if 'offline_life_pending' in conv:
             del conv['offline_life_pending']
-        
+
+        # 关系、心情、对方近况是用户级的：换话题不该换关系
+        if self.is_continuity():
+            self._sync_user_state(core)
+
         self.save_conversations()
         return core
     
@@ -418,65 +481,99 @@ class ConversationManager:
         
         conv = self.conversations[self.current_conversation_id]
         current_pad = conv['psych_core']['state']
-        long_term_memory = conv.get('memory', {})
-        
-        return self.generate_emotion_trigger_hint(current_pad, long_term_memory)
+
+        # 情绪联想：现在的心情让她想起哪几件旧事
+        items = []
+        try:
+            items = self.memory_store.by_emotion(
+                current_pad, self.current_conversation_id, k=2)
+        except Exception as exc:
+            print(f"⚠️ 情绪联想失败: {exc}")
+
+        if not items:
+            return ""
+
+        lines = ["[🌙 此刻的心情让你想起]"]
+        for item in items:
+            lines.append("· %s %s" % (item.get("time", ""), item["content"]))
+        lines.append("（如果想提，就轻轻带一句；不想提也没关系。）")
+        return "\n".join(lines)
     
     # ========== 以下方法保持不变 ==========
     
-    def new_conversation(self):
-        """创建新对话 - 使用完整的心理内核"""
-        if self.conversations:
-            new_id = max(self.conversations.keys()) + 1
-        else:
-            new_id = 1
-        
+    def _default_mood(self):
+        """她的"平时心情"由性格算出来，不是拍一个数。"""
+        try:
+            base = self.emotion_engine.baseline_from_personality(DEFAULT_PERSONALITY)
+        except Exception:
+            base = {"pleasure": 0.2, "arousal": 0.05, "dominance": 0.15}
+        return {
+            "pleasure": round(float(base["pleasure"]), 3),
+            "arousal": round(float(base["arousal"]), 3),
+            "dominance": round(float(base["dominance"]), 3),
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+
+    def new_conversation(self, continuity=True):
+        """创建新对话。
+
+        continuity=True（延续）：关系、心情、"他最近怎么样"都接着上一段走，
+        只是换了个话题。continuity=False（重新认识）：关系回到陌生人，
+        也读不到之前跨对话的记忆——想重新体验一次的用户要的就是这个。
+        """
+        new_id = self.conv_store.next_id()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        
-        self.conversations[new_id] = {
+
+        personality = dict(DEFAULT_PERSONALITY)
+        mood = self._default_mood()
+
+        if continuity:
+            try:
+                us = self.conv_store.get_user_state() or {}
+            except Exception:
+                us = {}
+            personality = dict(us.get("personality") or personality)
+            relationship = dict(us.get("relationship") or INITIAL_RELATIONSHIP)
+            mood = dict(us.get("mood") or mood)
+            user_emotion = dict(us.get("user_emotion") or {})
+            # 新话题的情绪从当前心情出发，不再从"莫名开心"起跳
+            state = {
+                "pleasure": float(mood.get("pleasure", 0)),
+                "arousal": float(mood.get("arousal", 0)),
+                "dominance": float(mood.get("dominance", 0)),
+                "energy": 80,
+            }
+        else:
+            relationship = dict(INITIAL_RELATIONSHIP)
+            user_emotion = {}
+            state = {"pleasure": 0.35, "arousal": 0.05, "dominance": 0.1, "energy": 80}
+
+        conv = {
             "title": f"对话 {new_id} - {timestamp}",
             "messages": [],
+            "message_count": 0,
             "custom_role_prompt": None,
+            "created_at": timestamp,
             "last_interaction_time": timestamp,
-            
-            # 完整的心理内核
+            "continuity": 1 if continuity else 0,
             "psych_core": {
-                "personality": {
-                    "openness": 0.7,
-                    "conscientiousness": 0.6,
-                    "extraversion": 0.5,
-                    "agreeableness": 0.8,
-                    "neuroticism": 0.4
-                },
-                "state": {
-                    "pleasure": 0.5,
-                    "arousal": 0.1,
-                    "dominance": 0.1,
-                    "energy": 80
-                },
-                "relationship": {
-                    "trust": 50,
-                    "intimacy": 50,
-                    "stress": 0
-                }
+                "personality": personality,
+                "state": state,
+                "relationship": relationship,
+                "mood": mood,
+                "user_emotion": user_emotion,
             },
-            
-            # ⭐ 扩展的长期记忆结构
-            "memory": {
-                "emotional_events": [],       # 情感事件(已有)
-                "user_profile": {},            # 用户档案(姓名、生日、喜好等)
-                "long_term_summaries": [],     # 历史摘要
-                "relationship_history": [],    # 关系里程碑
-                "discussed_topics": [],        # 讨论过的话题
-                "important_events": []         # ⭐ 新增:重要事件
-            }
         }
-        
+        conv['_loaded'] = True
+
+        self.conversations[new_id] = conv
+        self.conv_store.create(new_id, conv['title'], conv['psych_core'],
+                               continuity=continuity)
         self.current_conversation_id = new_id
-        self.save_conversations()
-        
-        print(f"✓ 创建新对话: ID={new_id}, 智能记忆系统已初始化")
-        return new_id, self.conversations[new_id]
+        self._hist_offset = 0
+
+        print("✓ 创建新对话: ID=%d（%s）" % (new_id, "延续" if continuity else "重新认识"))
+        return new_id, conv
     
     def get_effective_role_prompt(self):
         """获取当前对话的有效角色设定"""
@@ -526,50 +623,147 @@ class ConversationManager:
             return True
         return False
     
+    def is_continuity(self):
+        """这段对话是否延续「你们的」关系与记忆。"""
+        if not self.current_conversation_id:
+            return True
+        conv = self.conversations.get(self.current_conversation_id) or {}
+        return bool(conv.get('continuity', 1))
+
+    def memory_scopes(self):
+        """延续模式能读跨对话记忆；重新认识只读本对话。"""
+        return ("conv", "user") if self.is_continuity() else ("conv",)
+
     def get_psych_state(self):
-        """获取当前对话的完整心理状态"""
-        if self.current_conversation_id:
-            conv = self.conversations[self.current_conversation_id]
-            
-            if 'psych_core' not in conv:
-                conv['psych_core'] = {
-                    "personality": {
-                        "openness": 0.5, "conscientiousness": 0.5,
-                        "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5
-                    },
-                    "state": {
-                        "pleasure": 0.0, "arousal": 0.0, "dominance": 0.0, "energy": 50
-                    },
-                    "relationship": {
-                        "trust": 50, "intimacy": 50, "stress": 0
-                    }
-                }
-                self.save_conversations()
-            
-            return conv['psych_core']
-        
-        return None
+        """获取当前对话的完整心理状态。
+
+        关系、心情、对方近况是**用户级**的：换话题不该换关系。所以这里把
+        user_state 合进来，对话自己只保留 state（这一轮的情绪）。
+        """
+        if not self.current_conversation_id:
+            return None
+
+        conv = self.conversations[self.current_conversation_id]
+
+        if 'psych_core' not in conv:
+            conv['psych_core'] = {
+                "personality": dict(DEFAULT_PERSONALITY),
+                "state": {"pleasure": 0.0, "arousal": 0.0, "dominance": 0.0, "energy": 50},
+                "relationship": dict(INITIAL_RELATIONSHIP),
+                "mood": self._default_mood(),
+                "user_emotion": {},
+            }
+            self.save_conversations()
+
+        core = conv['psych_core']
+
+        if self.is_continuity():
+            try:
+                us = self.conv_store.get_user_state() or {}
+            except Exception:
+                us = {}
+            if us.get('relationship'):
+                core['relationship'] = us['relationship']
+            if us.get('mood'):
+                core['mood'] = us['mood']
+            if us.get('user_emotion'):
+                core['user_emotion'] = us['user_emotion']
+            if us.get('personality'):
+                core['personality'] = us['personality']
+
+        core.setdefault('mood', self._default_mood())
+        core.setdefault('user_emotion', {})
+        return core
+
+    def _sync_user_state(self, core):
+        """把用户级的状态写回全局：关系、心情、对方近况、人格。"""
+        try:
+            self.conv_store.save_user_state({
+                "personality": core.get('personality') or DEFAULT_PERSONALITY,
+                "relationship": core.get('relationship') or INITIAL_RELATIONSHIP,
+                "mood": core.get('mood') or self._default_mood(),
+                "user_emotion": core.get('user_emotion') or {},
+            })
+        except Exception as exc:
+            print("⚠️ 保存用户状态失败: %s" % exc)
+
+    def relationship_stage(self):
+        """初识 / 熟悉 / 亲近 / 依赖——用来约束称呼和主动程度。"""
+        core = self.get_psych_state() or {}
+        intimacy = float((core.get('relationship') or {}).get('intimacy', 50))
+        return stage_of(intimacy)
+
+    def note_user_emotion(self, emotion):
+        """记下对方当前的情绪，并累计"连续几轮不太好"。
+
+        单轮没意义，连着的低落才有意义——这才是"他最近不太好"。
+        """
+        if not emotion or not self.current_conversation_id:
+            return
+        core = self.get_psych_state()
+        if core is None:
+            return
+
+        name = emotion.get('dominant_emotion') or 'neutral'
+        conf = float(emotion.get('confidence') or 0)
+        negative = name in ('sad', 'angry', 'anxious', 'fear', 'disgust', 'frustrated')
+
+        prev = dict(core.get('user_emotion') or {})
+        streak = int(prev.get('negative_streak', 0))
+        if negative and conf >= 0.3:
+            streak += 1
+        elif name in ('happy', 'excited', 'grateful', 'neutral') and conf >= 0.3:
+            streak = 0
+
+        core['user_emotion'] = {
+            "emotion": name,
+            "confidence": round(conf, 2),
+            "negative_streak": streak,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        # 只改内存，随这一轮的 update_psych_state 一起落盘，减少写入次数
+
+    def mood_summary(self):
+        core = self.get_psych_state() or {}
+        mood = core.get('mood') or {}
+        return {
+            "label": _mood_label(mood),
+            "stage": self.relationship_stage(),
+            "continuity": self.is_continuity(),
+            "mood": mood,
+            "user_emotion": core.get('user_emotion') or {},
+        }
     
     def get_long_term_memory(self):
-        """⭐ 获取长期记忆"""
-        if self.current_conversation_id:
-            conv = self.conversations[self.current_conversation_id]
-            
-            # 兼容旧数据
-            if 'memory' not in conv:
-                conv['memory'] = {
-                    "emotional_events": [],
-                    "user_profile": {},
-                    "long_term_summaries": [],
-                    "relationship_history": [],
-                    "discussed_topics": [],
-                    "important_events": []
-                }
-                self.save_conversations()
-            
-            return conv['memory']
-        
-        return None
+        """长期记忆的只读视图（内容已经搬进 SQLite，这里拼给旧调用方看）。"""
+        if not self.current_conversation_id:
+            return None
+        try:
+            items = self.memory_store.list_recent(self.current_conversation_id, limit=200)
+        except Exception:
+            items = []
+        view = {
+            "user_profile": {},
+            "important_events": [],
+            "emotional_events": [],
+            "discussed_topics": [],
+            "long_term_summaries": [],
+        }
+        for item in items:
+            kind = item.get("kind")
+            if kind == "profile":
+                view["user_profile"].setdefault("profile_notes", []).append(
+                    {"content": item["content"], "importance": item["importance"]})
+            elif kind == "preference":
+                view["user_profile"].setdefault("preferences", []).append(
+                    {"content": item["content"], "importance": item["importance"]})
+            elif kind == "event":
+                view["important_events"].append(item)
+            elif kind == "emotion":
+                view["emotional_events"].append(item)
+            elif kind == "topic":
+                view["discussed_topics"].append(item["content"])
+        return view
     
     def get_current_state(self):
         """兼容旧接口:返回简化的状态(用于UI显示)"""
@@ -605,49 +799,240 @@ class ConversationManager:
         return int(psych['relationship']['intimacy'])
     
     
-    def get_compressed_messages(self):
-        """
-        ⭐ 获取压缩后的消息历史(智能Token管理)
-        
-        Returns:
-            (压缩后的消息列表, 提取的摘要信息)
+    def get_compressed_messages(self, max_tokens=2600, keep_recent=HIST_SOFT_KEEP):
+        """取要发给模型的上下文：最近一段原文 + 更早对话的摘要。
+
+        和以前不一样的地方：窗口**不是每轮滑一格**，而是攒到 HIST_HARD_CAP 条
+        才整体往前跳一次。
+
+        为什么这很重要：提示词缓存是按"前缀完全一致"命中的。以前每轮丢掉最旧
+        一条、补上最新一条，整个 messages 前缀每轮都在变，缓存等于没有——一个
+        聊到第 30 轮的会话，仍然为每一轮的完整历史按原价付费。改成批量前移后，
+        两次跳窗之间（十几轮）前缀一字不差，那一段就是命中缓存的。
+
+        跳窗时被丢掉的旧消息早就在摘要里了（maybe_summarize 保留的正是
+        HIST_SOFT_KEEP 条），所以不会真的失忆。
         """
         if not self.current_conversation_id:
             return [], ""
-        
-        conv = self.conversations[self.current_conversation_id]
-        messages = conv['messages']
-        
-        # 计算当前token使用量
-        current_tokens = self.memory_manager.calculate_messages_tokens(messages)
-        
-        # 如果超过阈值,执行压缩
-        if self.memory_manager.should_compress(current_tokens):
-            print(f"⚠️ Token使用 {current_tokens}/{self.memory_manager.max_tokens},开始智能压缩...")
-            
-            # ⭐ 关键升级:使用备用压缩(为了避免循环依赖)
-            # 真正的LLM摘要可以在main.py中单独触发
-            compressed_msgs, summary = self.memory_manager.compress_messages(
-                messages,
-                self.memory_manager.compress_target
+
+        conv = self._ensure_messages_loaded(self.current_conversation_id)
+        messages = conv.get('messages') or []
+        if not messages:
+            return [], ""
+
+        n = len(messages)
+        if self._hist_offset > n:
+            self._hist_offset = max(0, n - keep_recent)
+        if n - self._hist_offset > HIST_HARD_CAP:
+            self._hist_offset = n - keep_recent
+
+        recent = list(messages[self._hist_offset:])
+
+        # 极端情况兜底：几十条长消息还是要按 token 砍，哪怕会破坏前缀
+        used = 0
+        while len(recent) > 4:
+            cost = sum(self.memory_manager.estimate_tokens(m.get('content', ''))
+                       for m in recent)
+            if cost <= max_tokens:
+                used = cost
+                break
+            recent = recent[2:]
+            self._hist_offset += 2
+            used = cost
+
+        summaries = []
+        try:
+            summaries = self.conv_store.summaries(self.current_conversation_id, 3)
+        except Exception:
+            pass
+
+        return recent, "\n".join(summaries)
+
+    def maybe_summarize(self, api_handler, keep_recent=HIST_SOFT_KEEP):
+        """把压到保留区之外的旧消息做一次摘要（每 ~20 条才触发一次）。"""
+        if not self.current_conversation_id or api_handler is None:
+            return False
+
+        try:
+            batch = self.conv_store.messages_to_summarize(
+                self.current_conversation_id, keep_recent=keep_recent)
+        except Exception as exc:
+            print(f"⚠️ 读取待摘要消息失败: {exc}")
+            return False
+
+        if len(batch) < 8:
+            return False
+
+        lines = []
+        for msg in batch:
+            who = "用户" if msg["role"] == "user" else "星织"
+            text = msg["content"].strip().replace("\n", " ")
+            if len(text) > 120:
+                text = text[:120] + "…"
+            lines.append("%s: %s" % (who, text))
+        transcript = "\n".join(lines)
+
+        prompt = (
+            "把下面这段对话整理成两样东西，给之后的你（星织）当回忆用。\n"
+            "1. summary：第三人称摘要，300 字以内。保留用户说过的事实、约定、"
+            "情绪转折、没聊完的话题；丢掉客套和重复。\n"
+            "2. reflections：0~2 条，每条 40 字以内，写你对他这个人的理解"
+            "（他在意什么、习惯怎么应对、嘴上和心里不一致的地方）。"
+            "必须有对话里的依据，不能猜、不能编；没有就空数组。\n"
+            "只输出 JSON：{\"summary\": \"...\", \"reflections\": [\"...\"]}\n\n"
+            + transcript
+        )
+
+        try:
+            ok, text = api_handler.call_api(
+                [{"role": "user", "content": prompt}],
+                "你是一个精准的对话整理器，只输出 JSON。",
             )
-            
-            # 将摘要存入长期记忆
-            if summary and 'memory' in conv:
-                conv['memory']['long_term_summaries'].append({
-                    "summary": summary,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "covered_messages": len(messages) - len(compressed_msgs)
-                })
-                # 只保留最近10条摘要
-                conv['memory']['long_term_summaries'] = conv['memory']['long_term_summaries'][-10:]
-            
-            self.save_conversations()
-            print(f"✓ 压缩完成: {len(messages)}条 → {len(compressed_msgs)}条")
-            
-            return compressed_msgs, summary
-        
-        return messages, ""
+        except Exception as exc:
+            print(f"⚠️ 摘要失败: {exc}")
+            return False
+
+        if not ok or not text or len(text.strip()) < 10:
+            return False
+
+        text = text.strip()
+        summary, reflections = text, []
+        if text.startswith("{"):
+            try:
+                data = json.loads(text)
+                summary = (data.get("summary") or "").strip() or text
+                reflections = [r for r in (data.get("reflections") or [])
+                               if isinstance(r, str) and 4 <= len(r) <= 80][:2]
+            except Exception:
+                # 模型套了层 JSON 但没闭合：退回纯文本摘要，别把反思弄丢就整段失败
+                m = re.search(r'"summary"\s*:\s*"(.*?)"\s*[,}]', text, re.DOTALL)
+                if m:
+                    summary = m.group(1)
+                else:
+                    summary = re.sub(r'^\s*\{.*?"summary"\s*:\s*"', "", text, flags=re.DOTALL)
+
+        if not summary or len(summary.strip()) < 10:
+            return False
+
+        upto = batch[-1]["id"]
+        self.conv_store.add_summary(self.current_conversation_id, summary.strip(), upto)
+        self.conv_store.mark_summarized(self.current_conversation_id, upto)
+        print("✓ 已摘要 %d 条旧消息" % len(batch))
+
+        # L4：反思单独入库。它不是"发生过什么"，而是"你怎么看他"——
+        # 检索到的时候会以一句判断出现在提示词里，这比十条流水账更像认识一个人。
+        for line in reflections:
+            try:
+                self.memory_store.remember(
+                    line, kind="reflection", conv_id=self.current_conversation_id,
+                    importance=6.8, confidence=0.6, scope=self._memory_scope())
+            except Exception as exc:
+                print(f"⚠️ 反思入库失败: {exc}")
+        if reflections:
+            print("✓ 沉淀 %d 条反思" % len(reflections))
+        return True
+
+    # ------------------------------------------------------------ 记忆
+
+    def recall_memories(self, query, pad=None, k=6):
+        """按当前这句话取相关记忆。延续模式会带上跨对话的部分。"""
+        if not self.current_conversation_id:
+            return [], []
+        scopes = self.memory_scopes()
+        try:
+            pinned = self.memory_store.pinned(
+                self.current_conversation_id, 4, scopes=scopes)
+            recalled = self.memory_store.recall(
+                query, self.current_conversation_id, pad, k=k, scopes=scopes)
+        except Exception as exc:
+            print(f"⚠️ 记忆检索失败: {exc}")
+            return [], []
+        # 已经钉住的不再重复出现在"往事"里
+        pinned_ids = {m["id"] for m in pinned}
+        recalled = [m for m in recalled if m["id"] not in pinned_ids]
+        return pinned, recalled
+
+    def is_light_turn(self, text):
+        """寒暄级的一轮：短、且没有情绪/事件信号。"""
+        t = (text or "").strip()
+        if not t or len(t) > _LIGHT_MAX:
+            return False
+        return _EMOTION_WORDS.search(t) is None
+
+    def pinned_only(self):
+        """只取"每次都要在场"的固定事实（名字/生日/职业）。"""
+        if not self.current_conversation_id:
+            return []
+        try:
+            return self.memory_store.pinned(
+                self.current_conversation_id, 4, scopes=self.memory_scopes())
+        except Exception:
+            return []
+
+    def recent_timeline(self, days=45, k=5):
+        """你们最近这段日子发生过什么（按时间正序）。"""
+        if not self.current_conversation_id:
+            return []
+        try:
+            return self.memory_store.timeline(
+                self.current_conversation_id, self.memory_scopes(), days=days, k=k)
+        except Exception as exc:
+            print(f"⚠️ 时间线读取失败: {exc}")
+            return []
+
+    def _memory_scope(self):
+        return "user" if self.is_continuity() else "conv"
+
+    def remember_from_extraction(self, extracted, ai_text="", pad=None):
+        """规则抽出来的信息 → 记忆库。"""
+        if not self.current_conversation_id:
+            return 0
+        conv_id = self.current_conversation_id
+        n = 0
+        try:
+            info = (extracted or {}).get("user_info") or {}
+            for field, label, key, imp in (
+                ("name", "用户的名字是", "profile:name", 9.0),
+                ("birthday", "用户的生日是", "profile:birthday", 8.0),
+                ("occupation", "用户的工作是", "profile:occupation", 8.5),
+            ):
+                value = info.get(field)
+                if value:
+                    action, _ = self.memory_store.remember(
+                        "%s%s" % (label, value), kind="profile", conv_id=conv_id,
+                        key=key, importance=imp, confidence=0.9,
+                        scope=self._memory_scope())
+                    n += action in ("add", "update", "supersede")
+
+            for pref in (extracted or {}).get("preferences") or []:
+                action, _ = self.memory_store.remember(
+                    pref, kind="preference", conv_id=conv_id,
+                    importance=6.5, confidence=0.7, scope=self._memory_scope())
+                n += action in ("add", "update")
+
+            for topic in (extracted or {}).get("topics") or []:
+                action, _ = self.memory_store.remember(
+                    "聊过：%s" % topic, kind="topic", conv_id=conv_id,
+                    importance=3.0, confidence=0.6, scope=self._memory_scope())
+                n += action in ("add", "update")
+        except Exception as exc:
+            print(f"⚠️ 记忆写入失败: {exc}")
+        return n
+
+    def remember_fact(self, content, kind="event", importance=None, pad=None):
+        """模型主动给的 memory_update 落库。"""
+        if not self.current_conversation_id or not content:
+            return False
+        try:
+            action, _ = self.memory_store.remember(
+                content, kind=kind, conv_id=self.current_conversation_id,
+                importance=importance, pad=pad, confidence=0.85,
+                scope=self._memory_scope())
+            return action in ("add", "update", "supersede")
+        except Exception as exc:
+            print(f"⚠️ 记忆写入失败: {exc}")
+            return False
     
     
     def get_current_conversation(self):
@@ -657,13 +1042,28 @@ class ConversationManager:
         return None
     
     def add_message(self, role, content):
-        """添加消息到当前对话"""
-        if self.current_conversation_id:
-            self.conversations[self.current_conversation_id]['messages'].append({
-                "role": role,
-                "content": content
-            })
-            self.save_conversations()
+        """添加消息到当前对话：内存里留一份，同时落库（O(1)，不重写整份文件）"""
+        if not self.current_conversation_id:
+            return
+        conv = self.conversations[self.current_conversation_id]
+        self._ensure_messages_loaded(self.current_conversation_id)
+        conv.setdefault('messages', []).append({"role": role, "content": content})
+        conv['message_count'] = conv.get('message_count', 0) + 1
+        try:
+            tokens = self.memory_manager.estimate_tokens(content)
+        except Exception:
+            tokens = 0
+        self.conv_store.append_message(self.current_conversation_id, role, content, tokens)
+
+        # 第一句用户消息顺手当标题，列表里就不用再去翻消息了
+        if role == "user" and conv.get('message_count', 0) == 1:
+            title = re.sub(r"\s+", " ", content).strip()
+            if title:
+                conv['title'] = title[:22] + ('…' if len(title) > 22 else '')
+                try:
+                    self.conv_store.save_meta(self.current_conversation_id, conv)
+                except Exception:
+                    pass
     
     def delete_conversation(self, conv_id):
         """删除对话
@@ -687,6 +1087,11 @@ class ConversationManager:
 
         was_current = conv_id == self.current_conversation_id
         del self.conversations[conv_id]
+        try:
+            self.conv_store.delete(conv_id)
+            self.memory_store.drop_conversation(conv_id)
+        except Exception as e:
+            print(f"⚠️ 删除对话数据失败: {e}")
 
         if was_current:
             if self.conversations:
@@ -696,41 +1101,38 @@ class ConversationManager:
                     key=lambda k: str(self.conversations[k].get(
                         'last_interaction_time', ''))
                 )
+                self._ensure_messages_loaded(self.current_conversation_id)
             else:
                 self.current_conversation_id = None
 
-        self.reorder_conversation_ids()
+        self.redraw_conversation_titles()
         self.save_conversations()
         return True, "删除成功", self.current_conversation_id
-    
+
     def reorder_conversation_ids(self):
-        """重新排序对话ID"""
-        if not self.conversations:
-            return
-        
-        sorted_ids = sorted(self.conversations.keys())
-        new_conversations = {}
-        id_mapping = {}
-        
-        for new_id, old_id in enumerate(sorted_ids, start=1):
-            new_conversations[new_id] = self.conversations[old_id]
-            id_mapping[old_id] = new_id
-            
-            title = new_conversations[new_id]['title']
-            if f"对话 {old_id}" in title:
-                new_conversations[new_id]['title'] = title.replace(
-                    f"对话 {old_id}", f"对话 {new_id}"
-                )
-        
-        if self.current_conversation_id in id_mapping:
-            self.current_conversation_id = id_mapping[self.current_conversation_id]
-        
-        self.conversations = new_conversations
+        """保留旧名字，实际只重排标题（ID 现在被消息和记忆引用，不能随便改）"""
+        self.redraw_conversation_titles()
+
+    def redraw_conversation_titles(self):
+        """把「对话 N」里的编号按当前顺序对齐，ID 本身不动。"""
+        for index, conv_id in enumerate(sorted(self.conversations.keys()), start=1):
+            conv = self.conversations[conv_id]
+            title = conv.get('title') or ''
+            match = re.match(r'对话\s*(\d+)', title)
+            if not match or int(match.group(1)) == index:
+                continue
+            conv['title'] = title.replace(match.group(0), '对话 %d' % index, 1)
+            try:
+                self.conv_store.save_meta(conv_id, conv)
+            except Exception:
+                pass
     
     def switch_conversation(self, conv_id):
-        """切换对话"""
+        """切换对话（把目标对话的消息读进内存）"""
         if conv_id in self.conversations:
             self.current_conversation_id = conv_id
+            self._ensure_messages_loaded(conv_id)
+            self._hist_offset = 0
             self.apply_time_decay()
             print(f"✓ 切换到对话: ID={conv_id}")
             return True
@@ -742,80 +1144,112 @@ class ConversationManager:
         return result
     
     def save_conversations(self):
-        """保存所有对话到本地"""
+        """保存元数据（标题、心理状态）。
+
+        消息在 add_message 时已经单独落库了，这里不再整份重写。
+        """
+        if not self.current_conversation_id:
+            return
+        conv = self.conversations.get(self.current_conversation_id)
+        if conv is None:
+            return
         try:
-            if not os.path.exists(self.save_dir):
-                os.makedirs(self.save_dir)
-            
-            with open(self.conversations_path, 'w', encoding='utf-8') as f:
-                json.dump(self.conversations, f, ensure_ascii=False, indent=2)
+            self.conv_store.save_meta(self.current_conversation_id, conv)
         except Exception as e:
             print(f"✗ 保存失败: {e}")
-    
-    def load_conversations(self):
-        """从本地加载对话"""
+
+    def _ensure_messages_loaded(self, conv_id):
+        """消息按需从库里读，不在内存里堆所有对话的历史。"""
+        conv = self.conversations.get(conv_id)
+        if conv is None or conv.get('_loaded'):
+            return conv
         try:
-            if os.path.exists(self.conversations_path):
-                with open(self.conversations_path, 'r', encoding='utf-8') as f:
-                    loaded = json.load(f)
-                    self.conversations = {int(k): v for k, v in loaded.items()}
-                    
-                    # 兼容旧数据
-                    for conv_id in self.conversations:
-                        conv = self.conversations[conv_id]
-                        
-                        # 迁移旧的 role_prompt 到 custom_role_prompt
-                        if 'role_prompt' in conv:
-                            if conv['role_prompt'] != self.builtin_role_prompt:
-                                conv['custom_role_prompt'] = conv['role_prompt']
-                            else:
-                                conv['custom_role_prompt'] = None
-                            del conv['role_prompt']
-                        
-                        if 'custom_role_prompt' not in conv:
-                            conv['custom_role_prompt'] = None
-                        
-                        # 升级心理系统
-                        if 'psych_core' not in conv:
-                            old_affection = conv.get('state', {}).get('affection', 50) if 'state' in conv else 50
-                            
-                            conv['psych_core'] = {
-                                "personality": {
-                                    "openness": 0.5, "conscientiousness": 0.5,
-                                    "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5
-                                },
-                                "state": {
-                                    "pleasure": 0.0, "arousal": 0.0, "dominance": 0.0, "energy": 50
-                                },
-                                "relationship": {
-                                    "trust": 50, "intimacy": old_affection, "stress": 0
-                                }
-                            }
-                        
-                        # ⭐ 升级记忆系统
-                        if 'memory' not in conv:
-                            # 迁移旧的emotional_events
-                            old_events = conv.get('psych_core', {}).get('memory', {}).get('emotional_events', [])
-                            
-                            conv['memory'] = {
-                                "emotional_events": old_events,
-                                "user_profile": {},
-                                "long_term_summaries": [],
-                                "relationship_history": [],
-                                "discussed_topics": [],
-                                "important_events": []
-                            }
-                        
-                        if 'last_interaction_time' not in conv:
-                            conv['last_interaction_time'] = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    
-                    if self.conversations:
-                        self.current_conversation_id = max(self.conversations.keys())
-                        print(f"✓ 加载对话成功: {len(self.conversations)}个对话")
-                    else:
-                        print("✓ 没有历史对话")
-            else:
-                print("✓ 对话文件不存在,将创建新文件")
+            conv['messages'] = self.conv_store.load_messages(conv_id)
+        except Exception as e:
+            print(f"⚠️ 读取消息失败: {e}")
+            conv['messages'] = []
+        conv['_loaded'] = True
+        conv['message_count'] = len(conv['messages'])
+        return conv
+
+    def load_conversations(self):
+        """从 SQLite 加载；首次运行时把旧的 conversations.json 迁移进来。"""
+        legacy_memories = {}
+        try:
+            # 正常情况下读 conversations.json；如果它已经被迁移改名，
+            # 而库又丢了（比如手动删过 hoshiori.db），就从 .bak 里恢复一次
+            src = self.conversations_path
+            if not os.path.exists(src) and os.path.exists(src + ".bak"):
+                src = src + ".bak"
+            legacy_memories = self.conv_store.import_json(src) or {}
+        except Exception as e:
+            print(f"⚠️ 旧数据迁移失败: {e}")
+
+        # 万一库已经迁移过、但记忆还没搬（从 1.6 升级上来），从备份里补一次
+        if not legacy_memories:
+            backup = self.conversations_path + ".bak"
+            if os.path.exists(backup) and self.memory_store.stats().get('total', 0) == 0:
+                try:
+                    with open(backup, 'r', encoding='utf-8') as f:
+                        raw = json.load(f)
+                    for cid, conv in raw.items():
+                        mem = (conv or {}).get('memory')
+                        if mem:
+                            legacy_memories[int(cid)] = mem
+                except Exception as e:
+                    print(f"⚠️ 读取备份失败: {e}")
+
+        if legacy_memories:
+            total = 0
+            for conv_id, mem in legacy_memories.items():
+                try:
+                    total += self.memory_store.import_legacy(mem, conv_id)
+                except Exception as e:
+                    print(f"⚠️ 记忆迁移失败(对话 {conv_id}): {e}")
+            if total:
+                print(f"✓ 旧记忆已导入: {total} 条")
+
+        try:
+            self.conversations = self.conv_store.load_all()
         except Exception as e:
             print(f"✗ 加载失败: {e}")
             self.conversations = {}
+
+        default_core = {
+            "personality": dict(DEFAULT_PERSONALITY),
+            "state": {"pleasure": 0.0, "arousal": 0.0, "dominance": 0.0, "energy": 50},
+            "relationship": dict(INITIAL_RELATIONSHIP),
+            "mood": self._default_mood(),
+            "user_emotion": {},
+        }
+
+        for conv_id, conv in self.conversations.items():
+            conv.setdefault('custom_role_prompt', None)
+            conv.setdefault('continuity', 1)
+            if not conv.get('psych_core'):
+                conv['psych_core'] = json.loads(json.dumps(default_core))
+            else:
+                # 补齐老数据缺的字段
+                core = conv['psych_core']
+                core.setdefault('personality', default_core['personality'])
+                core.setdefault('state', default_core['state'])
+                core.setdefault('relationship', default_core['relationship'])
+                core.setdefault('mood', default_core['mood'])
+                core.setdefault('user_emotion', {})
+                core['state'].setdefault('energy', 50)
+            conv.setdefault('last_interaction_time', datetime.now().strftime("%Y-%m-%d %H:%M"))
+            conv['messages'] = []
+            conv['_loaded'] = False
+
+        if self.conversations:
+            self.current_conversation_id = max(self.conversations.keys())
+            self._ensure_messages_loaded(self.current_conversation_id)
+            # 启动时也按时间回落一次：关机这几天她不会一直停在某个情绪里
+            try:
+                self.apply_time_decay()
+            except Exception as exc:
+                print(f"⚠️ 启动情绪回落失败: {exc}")
+            stats = self.memory_store.stats()
+            print(f"✓ 加载对话成功: {len(self.conversations)}个对话, 记忆 {stats['active']} 条")
+        else:
+            print("✓ 还没有对话，等第一条消息")

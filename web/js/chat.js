@@ -145,9 +145,10 @@ async function sendMessage() {
         return;
     }
 
-    // 如果有文件，添加文件内容
+    // 如果有文件，添加文件内容（Word/Excel/PPT/PDF 已在后端转成纯文本）
     if (uploadedFileContent) {
-        message = `${message}\n\n--- 文件内容 (${uploadedFileName}) ---\n${uploadedFileContent}`;
+        const head = message ? `${message}\n\n` : '';
+        message = `${head}--- 文件内容（${uploadedFileName}）---\n${uploadedFileContent}`;
     }
 
     // 显示用户消息
@@ -187,11 +188,13 @@ async function sendMessage() {
  * @param {string} role - user / ai / system
  * @param {string} content
  * @param {number} index
+ * @param {boolean} continuation - 是否是同一轮回复的续句（不重复落款）
  * @returns {HTMLElement}
  */
-function buildMessageNode(role, content, index = 0) {
+function buildMessageNode(role, content, index = 0, continuation = false) {
     const node = document.createElement('div');
     node.className = `message-bubble ${role}`;
+    if (continuation) node.classList.add('is-cont');
     node.style.setProperty('--i', Math.min(index, 5));
 
     if (role === 'ai') {
@@ -231,17 +234,37 @@ function buildMessageNode(role, content, index = 0) {
 }
 
 /**
+ * 最后一条真实消息是谁说的（跳过「正在书写」的占位）
+ */
+function lastMessageRole() {
+    const box = document.getElementById('chatMessages');
+    if (!box) return '';
+    for (let i = box.children.length - 1; i >= 0; i--) {
+        const node = box.children[i];
+        if (node.id === 'typingIndicator') continue;
+        if (node.classList.contains('message-bubble')) {
+            if (node.classList.contains('ai')) return 'ai';
+            if (node.classList.contains('user')) return 'user';
+        }
+        return '';
+    }
+    return '';
+}
+
+/**
  * 显示消息气泡
  * @param {string} role - 角色: user, ai, system
  * @param {string} content - 消息内容
+ * @param {boolean} continuation - 同一轮回复的续句
  */
-function displayMessage(role, content) {
+function displayMessage(role, content, continuation = false) {
     const chatMessages = document.getElementById('chatMessages');
     if (!chatMessages) return;
 
     const stick = isNearBottom();
     const index = chatMessages.children.length;
-    const node = buildMessageNode(role, content, index);
+    const isCont = role === 'ai' && (continuation || lastMessageRole() === 'ai');
+    const node = buildMessageNode(role, content, index, isCont);
 
     chatMessages.appendChild(node);
     updateWelcome();
@@ -262,11 +285,16 @@ function receiveAIResponse(content) {
     const avatarImage = document.getElementById('avatarImage');
     if (avatarImage) avatarImage.classList.remove('thinking');
 
-    // 说话动画
+    // 说话动画（静态立绘用；Live2D 的嘴由语音回调驱动，别两边抢）
     if (window.avatarAnimationManager && avatarImage) {
-        avatarImage.classList.add('talking');
-        const duration = Math.min(String(content).length * 50, 5000);
-        setTimeout(() => avatarImage.classList.remove('talking'), duration);
+        const live2dActive = (typeof Live2DManager !== 'undefined') && Live2DManager.isInitialized;
+        if (appState.voiceEnabled && !live2dActive) {
+            avatarImage.classList.add('talking');
+            const duration = Math.min(String(content).length * 60, 4000);
+            setTimeout(() => avatarImage.classList.remove('talking'), duration);
+        } else {
+            avatarImage.classList.remove('talking');
+        }
     }
 
     const stick = isNearBottom();
@@ -274,6 +302,28 @@ function receiveAIResponse(content) {
     if (stick) scrollToBottom(true);
 
     isWaitingForResponse = false;
+}
+
+/**
+ * 给上一条 AI 气泡补一小段文字（比如结尾单独飘过来的 emoji）
+ */
+eel.expose(appendAIResponse);
+function appendAIResponse(extra) {
+    if (!extra) return;
+    const box = document.getElementById('chatMessages');
+    if (!box) return;
+    for (let i = box.children.length - 1; i >= 0; i--) {
+        const node = box.children[i];
+        if (node.id === 'typingIndicator') continue;
+        if (!node.classList.contains('ai')) break;
+        const body = node.querySelector('.msg-body');
+        if (!body) break;
+        body.appendChild(document.createTextNode(extra));
+        if (isNearBottom()) scrollToBottom(true);
+        return;
+    }
+    // 没有可追加的气泡，就当成一条新消息
+    displayMessage('ai', extra);
 }
 
 /**
@@ -388,11 +438,57 @@ async function loadCurrentConversation() {
 }
 
 /**
- * 新建对话
+ * 新建对话：先问一句要不要带上之前的一切
  */
-async function newConversation() {
+function newConversation() {
+    const content = `
+        <div class="continuity-picker">
+            <p class="continuity-lead">开一段新的对话。要带上之前的一切吗？</p>
+            <label class="continuity-option is-selected" data-value="1">
+                <input type="radio" name="continuity" value="1" checked>
+                <span class="continuity-mark" aria-hidden="true"></span>
+                <span class="continuity-body">
+                    <span class="continuity-title">继续聊<span class="continuity-tag">推荐</span></span>
+                    <span class="continuity-desc">她记得你说过的事，关系也从上次接着。只是换个话题。</span>
+                </span>
+            </label>
+            <label class="continuity-option" data-value="0">
+                <input type="radio" name="continuity" value="0">
+                <span class="continuity-mark" aria-hidden="true"></span>
+                <span class="continuity-body">
+                    <span class="continuity-title">重新认识</span>
+                    <span class="continuity-desc">关系回到最初，也读不到之前跨对话的记忆。像第一次见面。</span>
+                </span>
+            </label>
+            <p class="continuity-foot">两种都不会删掉已有的对话和记忆，随时能回到之前那段。</p>
+        </div>`;
+
+    const overlay = createModal('新的对话', content, [
+        { text: '取消', style: 'btn-ghost', onClick: () => {} },
+        {
+            text: '开始', style: 'btn-primary', onClick: () => {
+                const picked = overlay.querySelector('input[name="continuity"]:checked');
+                createNewConversation(!(picked && picked.value === '0'));
+            }
+        }
+    ]);
+    if (!overlay) return;
+
+    overlay.addEventListener('change', (e) => {
+        if (!e.target || e.target.name !== 'continuity') return;
+        overlay.querySelectorAll('.continuity-option').forEach(el => {
+            el.classList.toggle('is-selected', el.dataset.value === e.target.value);
+        });
+    });
+}
+
+async function createNewConversation(continuity) {
     try {
-        await eel.new_conversation_from_web()();
+        const result = await eel.new_conversation_from_web(continuity)();
+        if (result && result.success === false) {
+            showNotification('创建失败', 'error');
+            return;
+        }
         clearChat();
         updateWelcome();
         const sessionEl = document.getElementById('titlebarSession');
@@ -402,7 +498,8 @@ async function newConversation() {
         }
         closeModal(document.querySelector('.modal-overlay[data-modal="history"]'));
         await loadResumeHint();
-        showNotification('新的夜晚，新的对话', 'success', 2000);
+        showNotification(continuity ? '新的夜晚，接着聊' : '重新开始，她不记得之前了',
+            'success', 2200);
         const input = document.getElementById('messageInput');
         if (input) input.focus();
     } catch (e) {
@@ -426,6 +523,7 @@ function conversationItemsHtml(conversations) {
                     <span>${formatTime(conv.timestamp)}</span>
                     <span class="conversation-meta__dot">·</span>
                     <span>${conv.message_count} 则</span>
+                    ${conv.continuity === false ? '<span class="conversation-meta__break">重新认识</span>' : ''}
                     ${conv.is_current ? '<span class="conversation-meta__now">停留中</span>' : ''}
                 </div>
             </div>
@@ -573,6 +671,17 @@ async function refreshConversationState() {
 }
 
 /**
+ * 附件的一行摘要：类型 · 字数 · 截断提示
+ */
+function describeAttachment(result) {
+    const parts = [result.filename];
+    if (result.kind) parts.push(result.kind);
+    parts.push(`${result.char_count} 字符`);
+    if (result.truncated) parts.push(`已截断（原文 ${result.original_chars} 字）`);
+    return parts.join(' · ');
+}
+
+/**
  * 上传文件
  */
 async function uploadFile() {
@@ -585,10 +694,18 @@ async function uploadFile() {
 
             const fileIndicator = document.getElementById('fileIndicator');
             const fileInfo = document.getElementById('fileInfo');
-            if (fileInfo) fileInfo.textContent = `${result.filename} · ${result.char_count} 字符`;
+            if (fileInfo) {
+                fileInfo.textContent = describeAttachment(result);
+                fileInfo.title = describeAttachment(result);
+            }
             if (fileIndicator) fileIndicator.style.display = 'flex';
 
-            showNotification('文件已附上', 'success', 2000);
+            // 截断 / 页眉页脚这类提醒值得单独说一句，别让它只躺在 title 里
+            if (result.warning) {
+                showNotification(result.warning, 'info', 3200);
+            } else {
+                showNotification('文件已附上', 'success', 2000);
+            }
         } else if (result && result.cancelled) {
             console.log('用户取消了文件选择');
         } else {

@@ -56,6 +56,8 @@ from tts_manager import TTSManager
 from config import ConfigManager
 from conversation_manager import ConversationManager
 from api_handler import APIHandler
+from reply_stream import ReplyStreamer, split_segments
+import safety
 from theme_system import ThemeManager
 from web_bridge import start_web_app
 
@@ -160,25 +162,18 @@ class AIChatAppWeb:
         
         return avatars
     
-    def new_conversation(self):
-        """新建对话"""
-        conv_id, conv = self.conversation_manager.new_conversation()
+    def new_conversation(self, continuity=True):
+        """新建对话。continuity=False 表示"重新认识"：关系与跨对话记忆都不带过来。"""
+        conv_id, conv = self.conversation_manager.new_conversation(continuity=continuity)
         print(f"✨ 新对话已创建: {conv['title']}")
-        return True
+        return conv_id
     
     def load_conversation(self, conv_id):
         """加载指定对话"""
         try:
             self.conversation_manager.current_conversation_id = conv_id
+            self.conversation_manager._ensure_messages_loaded(conv_id)
             self.conversation_manager.apply_time_decay()
-            
-            # ⭐ 加载记忆图谱
-            conv = self.conversation_manager.get_current_conversation()
-            if conv and 'memory' in conv:
-                print("🔄 正在构建记忆图谱...")
-                self.conversation_manager.memory_graph.build_from_json(conv['memory'])
-                print("✅ 记忆图谱构建完成")
-            
             print(f"📂 已加载对话: {conv_id}")
             return True
         except Exception as e:
@@ -229,38 +224,51 @@ class AIChatAppWeb:
             
             # ⭐ 0. 分析用户输入情绪
             user_emotion = self.conversation_manager.analyze_user_emotion(user_input)
+            self._last_user_text = user_input
+            self._last_user_emotion = user_emotion
             print(f"📊 用户情绪分析: {user_emotion['dominant_emotion']} (置信度: {user_emotion['confidence']:.2f})")
             if user_emotion['complex_emotions']:
                 print(f"💭 复杂情绪: {list(user_emotion['complex_emotions'].keys())}")
             
             # ⭐ 立即保存用户消息（在API调用之前）
             self.conversation_manager.add_message("user", user_input)
+
+            # 对方的情绪要攒起来：单轮没意义，连着几轮低落才是"他最近不太好"
+            self.conversation_manager.note_user_emotion(user_emotion)
             
             # 1. 获取有效角色设定
             current_role = self.conversation_manager.get_effective_role_prompt()
             
-            # 2. 获取智能压缩后的消息历史
-            compressed_messages, recent_summary = self.conversation_manager.get_compressed_messages()
+            # 2. 获取智能压缩后的消息历史（包含刚存进去的这条，别再重复追加）
+            compressed_messages_copy, recent_summary = \
+                self.conversation_manager.get_compressed_messages()
             
-            # 添加当前用户消息
-            compressed_messages_copy = compressed_messages.copy()
-            compressed_messages_copy.append({"role": "user", "content": user_input})
-            
-            # 3. 构建长期记忆上下文
-            long_term_memory = self.conversation_manager.get_long_term_memory()
+            # 3. 构建长期记忆上下文：按这句话检索，不再整本注入
             current_psych = self.conversation_manager.get_psych_state()
             
             # ⭐ 改进1：添加时间戳到心理状态
             import time
             current_psych['last_interaction_time'] = time.time()
             
-            memory_context = ""
-            if long_term_memory:
-                memory_context = self.conversation_manager.memory_manager.build_memory_context(
-                    long_term_memory,
-                    recent_summary,
-                    current_pad=current_psych['state']
-                )
+            pinned, recalled = self.conversation_manager.recall_memories(
+                user_input, current_psych['state'])
+            timeline = self.conversation_manager.recent_timeline()
+            light_turn = self.conversation_manager.is_light_turn(user_input)
+            if light_turn:
+                # "在吗""晚安"这种：往事不用翻，固定事实还在，注入能薄一半
+                recalled, timeline = [], []
+                pinned = self.conversation_manager.pinned_only()
+            memory_context = self.conversation_manager.memory_manager.build_context(
+                pinned, recalled, recent_summary, budget_chars=1000, timeline=timeline)
+            if pinned or recalled:
+                print(f"🧠 记忆: 常用 {len(pinned)} 条, 相关 {len(recalled)} 条"
+                      f"{'，时间线 %d 条' % len(timeline) if timeline else ''}"
+                      f"{'（寒暄轮，已精简）' if light_turn else ''}")
+
+            # 3.5 本地风险识别：命中就轻一点说话，不拦截、不审查
+            risk_level, safety_note = safety.check(user_input)
+            if risk_level:
+                print(f"⚠️ 风险等级: {risk_level}")
             
             # 4. 获取离线生活状态
             offline_life = self.conversation_manager.get_offline_life_status()
@@ -290,67 +298,42 @@ class AIChatAppWeb:
                 api_config.get("provider", "")  # ⭐ 传递提供商标识，用于适配请求参数
             )
             
-            # 8. 调用API
+            # 8. 调用API（流式：边生成边把气泡一条条推出去）
+            streamer = None
+            if self.web_bridge:
+                streamer = ReplyStreamer(
+                    lambda seg: self.web_bridge.update_ai_response(seg),
+                    patch=lambda extra: self.web_bridge.append_ai_response(extra)
+                )
+
             success, result = self.api_handler.call_api(
                 compressed_messages_copy,
                 current_role,
                 current_psych,
                 memory_context,
                 offline_life,
-                emotion_trigger
+                emotion_trigger,
+                on_delta=streamer.feed if streamer else None,
+                safety_note=safety_note,
+                max_tokens=400 if light_turn else 1024
             )
             
             if success:
-                # ⭐ 改进2：后处理分段回复
-                # 检查是否包含分段标记 $
-                if '$' in result:
-                    print("🎯 检测到分段标记，启动分段回复功能")
-                    segments = result.split('$')
-                    print(f"📊 分段数量: {len(segments)}")
-                    
-                    # 处理并发送第一段
-                    clean_first = self._process_ai_response(segments[0].strip())
-                    print(f"📤 发送第1段: {clean_first[:50]}...")
-                    
-                    # 发送第一段到前端
-                    if self.web_bridge:
-                        self.web_bridge.update_ai_response(clean_first)
-                    
-                    # 保存完整消息到对话历史（移除$符号）
-                    full_message = ' '.join([seg.strip() for seg in segments])
-                    self.conversation_manager.add_message('assistant', full_message)
-                    
-                    # 延迟发送后续段落
-                    import time
-                    import random
-                    for i, segment in enumerate(segments[1:], 1):
-                        if segment.strip():
-                            # 随机延迟 1-2 秒，模拟"正在输入"
-                            delay = random.uniform(1.0, 2.0)
-                            print(f"⏳ 等待 {delay:.1f}秒 后发送第{i+1}段...")
-                            time.sleep(delay)
-                            
-                            # 清理后续段落（可能包含JSON）
-                            clean_segment = self._clean_ai_message(segment.strip())
-                            print(f"📤 发送第{i+1}段: {clean_segment[:50]}...")
-                            
-                            # 发送后续段落
-                            if self.web_bridge:
-                                self.web_bridge.update_ai_response(clean_segment)
-                    
-                    print("✅ 分段回复完成")
-                    # 使用完整消息进行后续处理
-                    clean_result = full_message
+                clean_result = self._process_ai_response(result)
+
+                if streamer is not None and streamer.any_emitted:
+                    # 流式已经把绝大部分推过了，这里只补最后一段
+                    streamer.finish(clean_result)
+                    segments = streamer.segments
                 else:
-                    # 正常处理（无分段）
-                    clean_result = self._process_ai_response(result)
-                    
-                    # 发送到前端
-                    if self.web_bridge:
-                        self.web_bridge.update_ai_response(clean_result)
-                    
-                    # 保存到对话历史
-                    self.conversation_manager.add_message('assistant', clean_result)
+                    # 非流式（本地模型/接口不支持）：按句子切开，依次弹出
+                    segments = self._push_reply_bubbles(clean_result)
+
+                # 存档按气泡断行，重新打开时长得跟当时看到的一样
+                if segments and len(segments) > 1:
+                    clean_result = "\n".join(s for s in segments if s.strip())
+
+                self.conversation_manager.add_message('assistant', clean_result)
                 
                 # ⭐ Phase 2: 认知一致性检查
                 consistency_check = self.conversation_manager.check_cognitive_consistency(
@@ -373,35 +356,27 @@ class AIChatAppWeb:
                     }
                 )
                 
-                # 双重记忆提取
+                # 规则抽取：姓名/生日/职业/喜好这些，不需要额外花 token 问模型
                 extracted_info = self.conversation_manager.memory_manager.extract_key_information(
                     user_input,
-                    result if not '$' in result else full_message  # 使用完整消息
+                    clean_result          # 用去掉 JSON 的正文
                 )
-                
-                # 如果规则方式提取到信息，合并到记忆
-                if any([
-                    extracted_info.get("user_info"),
-                    extracted_info.get("preferences"),
-                    extracted_info.get("topics"),
-                    extracted_info.get("emotional_events")
-                ]):
-                    if long_term_memory is not None:
-                        updated_mem = self.conversation_manager.memory_manager.merge_extracted_info_to_memory(
-                            extracted_info,
-                            long_term_memory
-                        )
-                        self.conversation_manager.conversations[
-                            self.conversation_manager.current_conversation_id
-                        ]['memory'] = updated_mem
-                        self.conversation_manager.save_conversations()
-                        
-                        if extracted_info.get("user_info"):
-                            print(f"✅ 记忆已更新(规则): 用户信息 {extracted_info['user_info']}")
-                        if extracted_info.get("preferences"):
-                            print(f"✅ 记忆已更新(规则): 偏好 {extracted_info['preferences']}")
-                        if extracted_info.get("topics"):
-                            print(f"✅ 记忆已更新(规则): 话题 {extracted_info['topics']}")
+
+                if any([extracted_info.get("user_info"),
+                        extracted_info.get("preferences"),
+                        extracted_info.get("topics")]):
+                    saved = self.conversation_manager.remember_from_extraction(
+                        extracted_info, clean_result, pad=current_psych.get('state'))
+                    if saved:
+                        print(f"✅ 记忆入库: {saved} 条（规则抽取）")
+
+                # 旧消息攒够一批就做一次摘要（后台跑，不挡回复）
+                try:
+                    threading.Thread(
+                        target=self.conversation_manager.maybe_summarize,
+                        args=(self.api_handler,), daemon=True).start()
+                except Exception:
+                    pass
                 
                 # ⭐ Phase 2: 检查是否需要主动行为
                 initiative_check = self.conversation_manager.check_initiative_needed({
@@ -445,40 +420,104 @@ class AIChatAppWeb:
             if self.web_bridge:
                 self.web_bridge.update_ai_response(f"❌ 系统提示: {friendly_error}")
     
+    def _push_reply_bubbles(self, text):
+        """非流式时的兜底：把整段回复按句子切成气泡，一条条弹出来。
+
+        第一段同步推（用户立刻看到反馈），其余丢到后台线程按 0.7~1.4 秒
+        的间隔推，既不卡住 TTS，也不会让请求线程陪着 sleep。
+        返回切出来的气泡列表，供调用方存档。
+        """
+        if not self.web_bridge or not text:
+            return []
+
+        segments = split_segments(text)
+        if not segments:
+            return []
+        if len(segments) == 1:
+            self.web_bridge.update_ai_response(segments[0])
+            return segments
+
+        self.web_bridge.update_ai_response(segments[0])
+
+        rest = segments[1:]
+
+        def run():
+            import random
+            for seg in rest:
+                time.sleep(random.uniform(0.7, 1.4))
+                try:
+                    self.web_bridge.update_ai_response(seg)
+                except Exception as exc:
+                    print(f"⚠️ 气泡推送失败: {exc}")
+                    break
+
+        threading.Thread(target=run, daemon=True).start()
+        return segments
+
+def _balanced_json(text, must_have=("appraisal", "dominant_emotion", "relationship_delta")):
+    """从回复里挖出心理状态 JSON：优先代码块，其次按括号配平。
+
+    用配平而不是正则，是因为这个 JSON 是嵌套的（appraisal 本身是个对象），
+    非贪婪正则会在内层 } 处截断，解析必然失败，情绪就白算了。
+    """
+    if not text:
+        return None, None
+
+    m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1)), m.group(0)
+        except Exception:
+            pass
+
+    for start, ch in enumerate(text):
+        if ch != "{":
+            continue
+        depth, in_str, esc = 0, False, False
+        for i in range(start, len(text)):
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    block = text[start:i + 1]
+                    if any(k in block for k in must_have):
+                        try:
+                            return json.loads(block), block
+                        except Exception:
+                            pass
+                    break
+    return None, None
+
+
     def _process_ai_response(self, raw_response):
         """处理AI原始回复，提取JSON和清理文本"""
         json_data = {}
         clean_text = raw_response
         
-        # 尝试提取JSON（多种模式）
-        json_match = re.search(r'```json\s*(\{.*?\})\s*```', raw_response, re.DOTALL)
-        if not json_match:
-            json_match = re.search(r'(\{.*?"pad_delta".*?\})', raw_response, re.DOTALL)
-        if not json_match:
-            # 尝试匹配任何包含 relationship_delta 或 dominant_emotion 的 JSON
-            json_match = re.search(r'(\{[^}]*?"(?:relationship_delta|dominant_emotion|internal_monologue)"[^}]*?\})', raw_response, re.DOTALL)
-        
-        if json_match:
-            try:
-                json_str = json_match.group(1)
-                
-                # 简单清理
-                if "'" in json_str and '"' not in json_str:
-                    json_str = json_str.replace("'", '"')
-                    
-                json_data = json.loads(json_str)
-                # 从原文中移除 JSON 部分
-                clean_text = raw_response.replace(json_match.group(0), "").strip()
-                
-                if 'internal_monologue' in json_data:
-                    print(f"\n🧠 AI内心独白: {json_data['internal_monologue']}")
-                    print(f"📊 PAD变化: {json_data.get('pad_delta', {})}")
-                    print(f"💞 关系变化: {json_data.get('relationship_delta', {})}")
-                    
-            except Exception as e:
-                print(f"⚠️  JSON解析失败: {e}")
-                # JSON 解析失败时，尝试移除看起来像 JSON 的部分
-                clean_text = raw_response
+        # 提取心理状态 JSON（代码块优先，其次括号配平）
+        json_data, block = _balanced_json(raw_response)
+        if block:
+            clean_text = raw_response.replace(block, "").strip()
+            if json_data:
+                mono = json_data.get('internal_monologue')
+                if mono:
+                    print(f"\n🧠 AI内心独白: {mono}")
+                print(f"📊 评价: {json_data.get('appraisal', {})}")
+                print(f"💞 关系变化: {json_data.get('relationship_delta', {})}")
+        if not json_data:
+            print("ℹ️ 这轮没拿到状态 JSON，情绪只按时间回落")
         
         # 强力清理：移除所有 JSON 相关内容（包括不完整的）
         # 1. 移除 ```json ... ``` 块
@@ -486,7 +525,7 @@ class AIChatAppWeb:
         
         # 2. 移除完整的 { ... } 块（包含特定关键字）- 多次执行以处理嵌套
         for _ in range(3):
-            clean_text = re.sub(r'\{[^{}]*?(?:pad_delta|relationship_delta|dominant_emotion|internal_monologue|user_intent_analysis|memory_update)[^{}]*?\}', '', clean_text, flags=re.DOTALL)
+            clean_text = re.sub(r'\{[^{}]*?(?:pad_delta|relationship_delta|dominant_emotion|internal_monologue|user_intent_analysis|memory_update|appraisal)[^{}]*?\}', '', clean_text, flags=re.DOTALL)
         
         # 3. 移除任何以逗号开头的JSON片段（最常见的残留模式）
         clean_text = re.sub(r',\s*"[^"]+"\s*:\s*[^,}]*(?:,\s*"[^"]+"\s*:\s*[^,}]*)*\s*\}', '', clean_text, flags=re.DOTALL)
@@ -531,15 +570,39 @@ class AIChatAppWeb:
         
         # 更新心理状态
         if json_data:
-            if 'memory_update' in json_data and json_data['memory_update']:
-                mem = json_data['memory_update']
-                if mem.get('type'):
-                    print(f"📝 记忆更新 [{mem['type']}]: {mem['content']}")
-            
-            new_core = self.conversation_manager.update_psych_state(json_data)
-            
+            user_text = getattr(self, '_last_user_text', '') or ''
+            user_emotion = getattr(self, '_last_user_emotion', None)
+
+            new_core = self.conversation_manager.update_psych_state(
+                json_data, user_text=user_text, analyzer_result=user_emotion)
+
+            emotion_info = getattr(self.conversation_manager, '_last_emotion_info', None)
+            if emotion_info:
+                print("🎭 情绪: %s | ΔPAD=%s | 基线=%s%s" % (
+                    emotion_info.get('emotions') or '平静',
+                    emotion_info.get('delta'),
+                    emotion_info.get('baseline'),
+                    ' (与文本情绪冲突，已削弱)' if emotion_info.get('contradicted') else ''))
+                if emotion_info.get('lingering'):
+                    print("💭 余味: %s ×%.2f" % (
+                        emotion_info['lingering'].get('emotion'),
+                        float(emotion_info['lingering'].get('intensity', 0))))
+
             mood = json_data.get('dominant_emotion', 'neutral')
             self.current_mood = mood  # 保存当前情绪状态
+
+            # ⭐ 把情绪交给语音：开心时语调上扬、难过时放缓，听着才像有情绪的人
+            try:
+                pad_now = None
+                if new_core:
+                    pad_now = {
+                        'pleasure': new_core['state']['pleasure'],
+                        'arousal': new_core['state']['arousal'],
+                        'dominance': new_core['state']['dominance'],
+                    }
+                self.tts_manager.set_mood(mood, pad_now)
+            except Exception:
+                pass
             
             # 更新Web界面
             if self.web_bridge:
@@ -560,24 +623,23 @@ class AIChatAppWeb:
                 # ⭐ 新增：根据对话内容触发特效
                 self.web_bridge.trigger_avatar_effect(clean_text)
                 
-                # ⭐ 新增：计算说话动画时长
-                talk_duration = min(len(clean_text) * 50, 5000)  # 最多5秒
-                self.web_bridge.start_avatar_talking(talk_duration)
+                # ⭐ 说话动画：只在语音真正播放时由 TTS 回调驱动（on_talk / on_stop）
+                # 以前这里按字数估一个时长去动嘴，但单位是毫秒、前端按秒算，
+                # 结果嘴会张两小时；而且没开语音也会动。现在统一交给语音。
+                if not self.voice_enabled:
+                    self.web_bridge.stop_avatar_talking()
             
-            # 处理记忆更新(JSON方式)
-            memory_info = self.conversation_manager.memory_manager.extract_memory_from_json(json_data)
-            if memory_info["has_update"]:
-                long_term_mem = self.conversation_manager.get_long_term_memory()
-                if long_term_mem is not None:
-                    updated_mem = self.conversation_manager.memory_manager.merge_memory_to_storage(
-                        memory_info,
-                        long_term_mem
-                    )
-                    self.conversation_manager.conversations[
-                        self.conversation_manager.current_conversation_id
-                    ]['memory'] = updated_mem
-                    self.conversation_manager.save_conversations()
-                    print(f"✅ 记忆已更新(JSON): {memory_info['content']}")
+            # 模型主动给的记忆（memory_update）落库
+            mem_update = json_data.get('memory_update')
+            if isinstance(mem_update, dict) and mem_update.get('content'):
+                kind = mem_update.get('type') or 'event'
+                kind = {'profile': 'profile', 'preference': 'preference',
+                        'event': 'event'}.get(kind, 'event')
+                saved = self.conversation_manager.remember_fact(
+                    mem_update['content'], kind=kind,
+                    pad=new_core['state'] if new_core else None)
+                if saved:
+                    print("✅ 记住了: %s" % mem_update['content'])
         
         # 清理文本
         clean_text = self._clean_ai_message(clean_text)

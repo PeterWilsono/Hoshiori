@@ -77,17 +77,31 @@
 - 支持多种AI模型（DeepSeek、小米MiMo、本地模型等）
 - 深度思考模式，提供更专业的回答
 - 联网搜索功能，获取实时信息
+- **附件上传**：Word（.docx/.doc）、Excel（.xlsx）、PPT（.pptx）、PDF 和文本/代码
+  都能直接拖进来问，后端转成纯文本再交给模型；单份最多取 6 万字，超出会提示截断
 
 #### 2. 情感系统
-- **PAD情绪模型**：愉悦度(Pleasure)、激活度(Arousal)、支配度(Dominance)
-- **性格特征**：开放性、尽责性、外向性、宜人性、神经质
-- **关系系统**：信任度、亲密度、压力值的动态变化
+- **先评价、再折算**：模型给出评价变量（合意/可能/该当/谁造成/能否应付/意外），
+  后端按 OCC 模型折成具体情绪，再映射到 PAD——每一步都能解释
+- **三层时间尺度**：这一句的情绪（emotion）/ 这一两天的心情（mood）/ 她本来是谁（人格基线）
+- **心情会自己缓**：没聊天时按 18 小时半衰期往基线回落，所以"昨天吵完架今天还有点闷"是自然发生的
+- **关系阶段**：初识 / 熟悉 / 亲近 / 依赖，用来约束称呼、主动程度和边界感
+- **对方的情绪会累积**：连续几轮低落才算"他最近不太好"，不会一轮就下结论
+- **交叉校验**：文本明显消极时，模型报的"开心"会被压回去
 
 #### 3. 记忆系统
-- **长期记忆**：自动提取并保存重要信息
-- **用户画像**：记录姓名、生日、职业等基本信息
-- **偏好记忆**：记住你喜欢和讨厌的事物
-- **事件记忆**：记录重要的共同回忆
+- **SQLite 存储**：消息一条一行（发消息 O(1)），不再整份重写 JSON
+- **两种范围**：`user` 是跨对话的（名字、职业、经历），`conv` 只属于某段对话
+- **新对话可选**：「继续聊」接着之前的关系与记忆；「重新认识」从零开始，也读不到旧记忆
+- **写入去重**：同一事实不会记两遍；换工作这类冲突会保留旧记录（可回答"以前是做什么的"）
+- **按话题检索**：本地语义向量（bge-small-zh，24MB，CPU）+ 关键词 + 重要度 + 新近度 +
+  情绪相似度一起算分。字面完全不同也能对上——说"老板又发火"，能想起"和主管关系不好"
+- **语义去重**：换了种说法但意思一样的合并成一条；换工作这类同槽位换值仍保留旧记录
+- **反思**：批量整理时顺手沉淀 0~2 条"对他的理解"（"他嘴上说没事，其实怕拖累同事"）
+- **时间线**：记忆会记下"大概哪天发生的"，能按时间拼出"你们最近这些事"
+- **会遗忘**：长期没用又不重要的记忆降级归档，可恢复
+- **批量摘要**：最近 26 条保留原文，更早的攒一批做一次摘要（窗口整体前移，不逐轮滑动）
+- **可查看可删除**：设置 → 存储 里按「全部 / 她一直记得 / 这段对话」筛着看，每条都能删
 
 #### 4. 视觉系统
 - Live2D立绘显示
@@ -96,10 +110,19 @@
 
 #### 5. 语音系统（可选）
 - **逐句流式朗读**：切开句子边合成边播，第一声通常在 1 秒内（旧版要等整段合成，3~5 秒）
-- **三个引擎自动切换**：在线女声（自然，需网络）→ 备用在线线路 → Windows 系统语音（离线）
-- 在线部分用的是免费接口，不需要申请 Key；断网也能说话
+- **会跟着情绪变语气**：开心时语调上扬、难过时放慢、害羞时放轻。情绪来自对话里算出的 dominant_emotion + PAD，合成时转成情感标签
+- **五档引擎，自动兜底**：
+
+  | 引擎 | 声音 | 一句的延迟 | 需要 |
+  | --- | --- | --- | --- |
+  | 千问神经语音（推荐） | 最像真人，能带情绪 | 0.6~1.2 s | 百炼 API Key（送 11 万字符） |
+  | 本地大模型（离线） | IndexTTS2 / Qwen3-TTS / Breeze / GPT-SoVITS | 0.3~2 s | 本机起个 HTTP 服务 |
+  | Fish Audio S2 | 多人对话、ASMR 最强 | 1~3 s | Fish Key |
+  | 在线免费（百度） | 可用，音质一般 | 0.3~0.7 s | 只要网络 |
+  | 系统语音 | Huihui / Yaoyao | 0.02~0.05 s | 什么都不用 |
+
 - **嘴型跟着声音动**：按每句音频的真实时长驱动，不是机械的循环动画
-- 可切换音色，设置里有「试听」
+- 设置 → 语音里可以对比「平铺直叙」和「带情绪」两种念法
 
 ### 🎨 界面特性
 
@@ -268,11 +291,20 @@ hoshiori-ai/
 ├── config.py                  # 配置管理
 ├── api_handler.py             # API请求处理
 ├── conversation_manager.py    # 对话管理
-├── memory_manager.py          # 记忆系统
-├── emotion_analyzer.py        # 情绪分析
+├── conversation_store.py      # 对话/消息落库（SQLite）
+├── memory_store.py            # 长期记忆：去重/失效/检索/遗忘/跨对话范围
+├── memory_manager.py          # 记忆提取与上下文拼装
+├── emotion_engine.py          # OCC 评价 → PAD → 心情层 → 基线回归
+├── emotion_analyzer.py        # 文本情绪读数（交叉校验）
+├── db.py                      # SQLite schema 与分词
+├── embedder.py                # 本地语义向量（bge-small-zh / ONNX，可降级）
+├── bert_tokenizer.py          # BERT WordPiece 分词（纯标准库）
+├── safety.py                  # 本地风险识别（命中只改提示词，不拦截）
+├── reply_stream.py            # 流式切句 → 一条条气泡
 ├── theme_system.py            # 主题系统
 ├── tts_manager.py             # 语音管理
 ├── web_bridge.py              # Live2D桥接
+├── models/bge-small-zh/        # 量化语义模型（24MB，随包发布）
 ├── assets/                    # 资源文件
 │   ├── avatars/              # 头像
 │   ├── icons/                # 图标
@@ -283,6 +315,9 @@ hoshiori-ai/
 │   ├── conversations.json   # 对话记录
 │   └── theme_config.json    # 主题配置
 ├── requirements.txt          # Python依赖
+├── local_tts/                # 本地语音组件（可选，独立环境）
+│   ├── install_local_tts.py  # 一键装 torch + Qwen3-TTS
+│   └── local_tts_server.py   # OpenAI 兼容的本地 TTS 服务
 └── README.md                 # 说明文档
 ```
 
@@ -305,7 +340,7 @@ hoshiori-ai/
 - 上下文压缩
 - 长期记忆存储
 
-#### 4. 记忆系统 (memory_manager.py)
+#### 4. 记忆系统 (memory_store.py / conversation_store.py)
 - 自动记忆提取
 - 智能摘要生成
 - 向量化存储（可选）
@@ -450,7 +485,10 @@ pip install -r requirements.txt
 - [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) - 现代化的Tkinter UI库
 - [Pillow](https://python-pillow.org/) - Python图像处理库
 - [Live2D](https://www.live2d.com/) - 2D模型动画技术
-- 百度翻译 / 百科的免费语音接口 - 在线中文语音
+- [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) / 阿里云百炼 - 云端与本地高质量中文语音
+- [IndexTTS2](https://github.com/index-tts/index-tts) - 本地零样本语音克隆（可选）
+- [Fish Audio](https://fish.audio/) - 多人对话与 ASMR 语音（可选）
+- 百度翻译 / 百科的免费语音接口 - 无需 Key 的兜底在线语音
 - Windows SAPI（pywin32）- 离线语音合成
 - [Edge-TTS](https://github.com/rany2/edge-tts) - 保留为可选（微软 2026-10 之后接口基本 403）
 
