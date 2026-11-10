@@ -151,6 +151,14 @@ async function sendMessage() {
         message = `${head}--- 文件内容（${uploadedFileName}）---\n${uploadedFileContent}`;
     }
 
+    // 正在"改一下重发"的话，先把旧的那条（以及它之后的）删掉。
+    // 必须先截断再插新消息，否则会多出一条重复的。
+    if (typeof applyPendingEdit === 'function') {
+        await applyPendingEdit();
+        clearChat();
+        await loadCurrentConversation();
+    }
+
     // 显示用户消息
     displayMessage('user', message);
 
@@ -164,6 +172,7 @@ async function sendMessage() {
 
     // 设置等待状态
     isWaitingForResponse = true;
+    if (typeof markSending === 'function') markSending();
 
     // 显示typing指示器
     showTypingIndicator();
@@ -173,13 +182,23 @@ async function sendMessage() {
     if (avatarImage) avatarImage.classList.add('thinking');
 
     try {
-        await eel.send_message_from_web(message)();
+        const ok = await eel.send_message_from_web(message)();
+        if (ok === false) throw new Error('服务端拒绝了这条消息');
     } catch (e) {
         console.error('Send message error:', e);
         removeTypingIndicator();
         if (avatarImage) avatarImage.classList.remove('thinking');
-        showNotification('发送失败，请重试', 'error');
+        if (typeof markFailed === 'function') markFailed();
+        // 说清楚哪一步坏了，别只丢一句"失败"
+        showNotification('没发出去。检查一下网络或者模型配置，再说一次？', 'error', 3600);
         isWaitingForResponse = false;
+        // 把内容还回输入框，省得重打
+        const box = document.getElementById('messageInput');
+        if (box && !box.value.trim()) {
+            box.value = message;
+            box.dispatchEvent(new Event('input'));
+            box.focus({ preventScroll: true });
+        }
     }
 }
 
@@ -191,18 +210,24 @@ async function sendMessage() {
  * @param {boolean} continuation - 是否是同一轮回复的续句（不重复落款）
  * @returns {HTMLElement}
  */
-function buildMessageNode(role, content, index = 0, continuation = false) {
+function buildMessageNode(role, content, index = 0, continuation = false, clock = '', msgId = '') {
     const node = document.createElement('div');
     node.className = `message-bubble ${role}`;
     if (continuation) node.classList.add('is-cont');
     node.style.setProperty('--i', Math.min(index, 5));
+    // 存了 id 才能在搜索里"跳回这一句"、才能"改一下重发"
+    if (msgId !== '' && msgId !== null && msgId !== undefined) {
+        node.dataset.msgId = String(msgId);
+    }
+    // 历史消息带真实时间；刚发出来的才用"此刻"
+    const stamp = clock || nowClock();
 
     if (role === 'ai') {
         node.innerHTML = `
             <div class="msg-rule">
                 <span class="msg-rule__star"><svg viewBox="0 0 24 24"><use href="#i-star"></use></svg></span>
                 <span class="msg-rule__line"></span>
-                <time class="msg-rule__time">${nowClock()}</time>
+                <time class="msg-rule__time">${stamp}</time>
                 <button class="msg-copy" type="button" aria-label="复制这段话" title="复制">
                     <svg class="icon" viewBox="0 0 24 24"><use href="#i-copy"></use></svg>
                 </button>
@@ -222,15 +247,51 @@ function buildMessageNode(role, content, index = 0, continuation = false) {
             }, 1400);
         });
     } else if (role === 'user') {
+        // 用户不拆气泡，但换行要留住（renderRichText 不管换行）
         node.innerHTML = `
-            <div class="msg-body">${renderRichText(content)}</div>
-            <div class="msg-meta">${nowClock()}</div>
+            <div class="msg-body">${renderRichText(content).replace(/\n/g, '<br>')}</div>
+            <div class="msg-meta">${stamp}</div>
         `;
+
+        // 只有带 id 的历史消息才允许改：刚发出去还没落库的那条没得改
+        if (node.dataset.msgId) {
+            const actions = document.createElement('div');
+            actions.className = 'msg-actions';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'msg-action';
+            btn.title = '改一下，重新说';
+            btn.setAttribute('aria-label', '改一下重发');
+            btn.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><use href="#i-edit"></use></svg>';
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                beginEditMessage(node.dataset.msgId, content);
+            });
+            actions.appendChild(btn);
+            node.appendChild(actions);
+        }
     } else {
         node.textContent = content;
     }
 
     return node;
+}
+
+/**
+ * 把一条气泡标成「她先开口」：星标换成暖色，抬头多一点小字。
+ * @param {HTMLElement} node
+ */
+function flagProactive(node) {
+    if (!node) return;
+    node.classList.add('is-proactive');
+    const rule = node.querySelector('.msg-rule');
+    if (!rule || rule.querySelector('.msg-rule__flag')) return;
+    const flag = document.createElement('span');
+    flag.className = 'msg-rule__flag';
+    flag.textContent = '她先开口';
+    const time = rule.querySelector('.msg-rule__time');
+    if (time) rule.insertBefore(flag, time);
+    else rule.appendChild(flag);
 }
 
 /**
@@ -302,6 +363,7 @@ function receiveAIResponse(content) {
     if (stick) scrollToBottom(true);
 
     isWaitingForResponse = false;
+    if (typeof markSent === 'function') markSent();
 }
 
 /**
@@ -394,6 +456,13 @@ function scrollToLatest() {
     if (pill) pill.classList.remove('is-visible');
 }
 
+/** "2026-11-10 23:12" → "23:12"；拿不到就用此刻 */
+function clockOf(stamp) {
+    if (!stamp) return '';
+    const m = String(stamp).match(/(\d{1,2}):(\d{2})/);
+    return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+}
+
 /**
  * 清空聊天内容
  */
@@ -419,13 +488,27 @@ async function loadCurrentConversation() {
 
         if (conversation && conversation.messages) {
             clearChat();
-            conversation.messages.forEach((msg, i) => {
+            let idx = 0;
+            for (const msg of conversation.messages) {
                 const role = msg.role === 'user' ? 'user' : (msg.role === 'assistant' ? 'ai' : 'system');
-                if (msg.content && msg.content.trim()) {
-                    const chatMessages = document.getElementById('chatMessages');
-                    chatMessages.appendChild(buildMessageNode(role, msg.content, i));
-                }
-            });
+                if (!msg.content || !msg.content.trim()) continue;
+                const clock = clockOf(msg.created_at);
+                // 存档里的 \n 就是当时那一泡一泡的分界，重开要还原成同样的节奏
+                const parts = role === 'ai'
+                    ? msg.content.split('\n').map(x => x.trim()).filter(Boolean)
+                    : [msg.content];
+                parts.forEach((part, j) => {
+                    const node = buildMessageNode(role, part, idx++, j > 0, clock, msg.id);
+                    // 只有一轮的第一泡带时间和落款
+                    if (j > 0) {
+                        const meta = node.querySelector('.msg-meta');
+                        if (meta) meta.remove();
+                    }
+                    // 主动消息的标记存在库里，重开对话还在
+                    if (msg.kind === 'proactive' && j === 0) flagProactive(node);
+                    document.getElementById('chatMessages').appendChild(node);
+                });
+            }
             updateWelcome();
             scrollToBottom(false);
         } else {

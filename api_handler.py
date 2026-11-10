@@ -437,7 +437,8 @@ class APIHandler:
                 final_system_prompt = system_prompt
 
             api_messages = [{"role": "system", "content": final_system_prompt}]
-            api_messages.extend(messages)
+            api_messages.extend(
+                {"role": m["role"], "content": m["content"]} for m in messages)
             if state_block:
                 if api_messages and api_messages[-1].get("role") == "user":
                     tail = api_messages.pop()

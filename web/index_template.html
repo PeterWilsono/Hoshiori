@@ -19,6 +19,8 @@
     <link rel="stylesheet" href="css/themes.css?v=1794267891">
     <link rel="stylesheet" href="css/components.css?v=1794267891">
     <link rel="stylesheet" href="css/animations.css?v=1794267891">
+    <!-- 打磨层：字号、反馈动效、新组件。必须最后加载，它要盖住上面的默认值 -->
+    <link rel="stylesheet" href="css/polish.css?v=1794267891">
 
     <!-- 渲染运行时：本地优先 + defer，任何网络抖动都不会挡住第一帧 -->
     <script defer src="lib/live2dcubismcore.min.js"></script>
@@ -117,7 +119,7 @@
 
         .boot__latin {
             margin-top: 14px;
-            font-size: 10px;
+            font-size: 11.5px;
             letter-spacing: .5em;
             text-indent: .5em;
             color: var(--ink-4, #79808f);
@@ -180,7 +182,7 @@
             right: 0;
             bottom: 34px;
             text-align: center;
-            font-size: 11px;
+            font-size: 12px;
             letter-spacing: .12em;
             color: var(--ink-4, #79808f);
             opacity: .62;
@@ -355,6 +357,27 @@
             <path d="M10 3.4v3M14 3.4v3M10 17.6v3M14 17.6v3M3.4 10h3M3.4 14h3M17.6 10h3M17.6 14h3" fill="none"
                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
         </symbol>
+        <symbol id="i-search" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="6.4" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <path d="M15.8 15.8L20 20" fill="none" stroke="currentColor" stroke-width="1.6"
+                stroke-linecap="round" />
+        </symbol>
+        <symbol id="i-edit" viewBox="0 0 24 24">
+            <path d="M4.6 19.4l.7-3.7L15.9 5.1a2 2 0 012.8 0l.9.9a2 2 0 010 2.8L9.1 18.7l-3.7.7z"
+                fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+            <path d="M14.4 6.6l3 3" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" />
+        </symbol>
+        <symbol id="i-redo" viewBox="0 0 24 24">
+            <path d="M5 12a7 7 0 1114 0 7 7 0 01-7 7" fill="none" stroke="currentColor" stroke-width="1.6"
+                stroke-linecap="round" />
+            <path d="M12 2.6l-3 3 3 3" fill="none" stroke="currentColor" stroke-width="1.6"
+                stroke-linecap="round" stroke-linejoin="round" />
+        </symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24">
+            <path d="M20 14.6A8.2 8.2 0 019.4 4a8.2 8.2 0 1010.6 10.6z" fill="none" stroke="currentColor"
+                stroke-width="1.5" stroke-linejoin="round" />
+        </symbol>
     </svg>
 
     <!-- ===== 启动画面 ===== -->
@@ -448,6 +471,13 @@
 
             <!-- 状态 -->
             <footer class="chamber-foot">
+                <button class="chamber-now" id="chamberNow" type="button" onclick="openLife()"
+                    title="看看她今天在做什么" aria-label="她今天">
+                    <span class="chamber-now__dot" aria-hidden="true"></span>
+                    <span class="chamber-now__text" id="chamberNowText">她今天还没记下什么</span>
+                    <svg class="icon"><use href="#i-moon"></use></svg>
+                </button>
+
                 <div class="affection">
                     <div class="affection__head">
                         <span class="label">好感度 <em>Affection</em></span>
@@ -493,6 +523,10 @@
                 </div>
 
                 <div class="toolbar-right">
+                    <button class="icon-btn" onclick="openSearch()" aria-label="搜索聊天记录"
+                        data-hint="搜索 Ctrl F">
+                        <svg class="icon"><use href="#i-search"></use></svg>
+                    </button>
                     <button class="btn btn-primary" onclick="newConversation()">
                         <svg class="icon icon-sm"><use href="#i-spark"></use></svg>
                         <span>新对话</span>
@@ -560,6 +594,13 @@
                         </button>
                     </div>
 
+                    <!-- 正在改一条旧消息：发出去会替换掉它和它之后的所有内容 -->
+                    <div class="composer-edit-bar" id="composerEditBar" hidden>
+                        <svg class="icon icon-sm"><use href="#i-edit"></use></svg>
+                        <span class="composer-edit-bar__text" id="composerEditText">正在改这一条</span>
+                        <button type="button" onclick="cancelEditMessage()">取消</button>
+                    </div>
+
                     <textarea id="messageInput" class="message-input" rows="1"
                         placeholder="与星织说些什么…" aria-label="输入消息"></textarea>
 
@@ -579,6 +620,42 @@
         </div>
     </div>
 
+    <!-- ===== 她今天（右侧抽屉） ===== -->
+    <aside class="life-drawer" id="lifeDrawer" aria-label="她今天" aria-hidden="true">
+        <header class="life-drawer__head">
+            <div>
+                <span class="life-drawer__eyebrow">HER DAY</span>
+                <h2 class="life-drawer__title" id="lifeDayTitle">她今天</h2>
+                <p class="life-drawer__sub" id="lifeDaySub">你不在的时候，她也在过自己的日子。</p>
+            </div>
+            <button class="icon-btn" type="button" onclick="closeLife()" aria-label="收起">
+                <svg class="icon"><use href="#i-close"></use></svg>
+            </button>
+        </header>
+        <div class="life-drawer__body" id="lifeBody"></div>
+        <footer class="life-drawer__foot">
+            <span id="lifeFootHint">这些事她都记着，聊到时会自然说出来。</span>
+            <button class="btn btn-ghost" type="button" onclick="refreshLife(this)">再过一会儿</button>
+        </footer>
+    </aside>
+
+    <!-- ===== 全库搜索 ===== -->
+    <div class="search-overlay" id="searchOverlay" hidden role="dialog" aria-modal="true" aria-label="搜索聊天记录">
+        <div class="search-box">
+            <div class="search-field">
+                <svg class="icon"><use href="#i-search"></use></svg>
+                <input type="text" id="searchInput" placeholder="搜所有对话里说过的话…" autocomplete="off"
+                    spellcheck="false" aria-label="搜索内容">
+                <kbd>Esc</kbd>
+            </div>
+            <div class="search-results" id="searchResults"></div>
+            <div class="search-foot">
+                <span id="searchCount">输入两个字以上开始搜</span>
+                <span>↑↓ 选择 · Enter 跳过去</span>
+            </div>
+        </div>
+    </div>
+
     <!-- 模态窗口容器 -->
     <div id="modalContainer"></div>
     <div id="toastLayer" class="toast-layer" aria-live="polite" aria-atomic="false"></div>
@@ -589,6 +666,7 @@
     <script src="js/theme.js?v=1794267891"></script>
     <script src="js/emotion.js?v=1794267891"></script>
     <script src="js/chat.js?v=1794267891"></script>
+    <script src="js/panels.js?v=1794267891"></script>
     <script src="js/ui.js?v=1794267891"></script>
     <script src="js/main.js?v=1794267891"></script>
 </body>

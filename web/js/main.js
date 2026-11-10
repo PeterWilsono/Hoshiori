@@ -991,14 +991,23 @@ async function loadMemoryList(scope = null) {
             const dead = m.status && m.status !== 'active';
             const scopeTag = m.scope === 'user'
                 ? '<span class="memory-item__scope">跨对话</span>' : '';
-            return `<div class="memory-item${dead ? ' is-dead' : ''}">
+            const text = escapeAudioText(m.content || '');
+            return `<div class="memory-item${dead ? ' is-dead' : ''}" data-id="${m.id}" data-text="${text.toLowerCase()}">
                 <span class="memory-item__kind">${escapeAudioText(kind)}</span>
                 ${scopeTag}
-                <span class="memory-item__text" title="${escapeAudioText(m.content)}">${escapeAudioText(m.content)}</span>
+                <span class="memory-item__text" title="${text}">${text}</span>
+                <button class="memory-item__btn" type="button" title="改一改"
+                        aria-label="修改这条记忆"
+                        onclick="editMemory(${m.id}, this)">
+                    <svg class="icon" viewBox="0 0 24 24"><use href="#i-edit"></use></svg>
+                </button>
                 <button class="memory-item__del" type="button" title="忘掉这条"
                         onclick="forgetMemory(${m.id})">×</button>
             </div>`;
         }).join('');
+
+        // 列表重建后把过滤条件重新应用一遍，别让搜索框失效
+        filterMemoryList();
     } catch (e) {
         console.error('读取记忆失败:', e);
         if (summary) summary.textContent = '读取失败。';
@@ -1030,14 +1039,136 @@ function setMemoryScope(scope, btn) {
 }
 
 async function forgetMemory(id) {
+    const item = document.querySelector(`.memory-item[data-id="${id}"]`);
+    // 先让它收走，再刷新——直接重绘会闪一下，看起来像"点了没反应"
+    if (item) {
+        item.classList.add('is-removing');
+        await new Promise(r => setTimeout(r, 240));
+    }
     try {
         const ok = await eel.delete_memory(id)();
         if (ok) {
             showNotification('已经忘了这条', 'info', 1600);
             loadMemoryList();
+        } else {
+            showNotification('删除失败', 'error');
         }
     } catch (e) {
         showNotification('删除失败', 'error');
+    }
+}
+
+/** 就地改一条记忆：行内输入，回车保存 */
+function editMemory(id, trigger) {
+    const item = trigger.closest('.memory-item');
+    if (!item || item.querySelector('.memory-edit')) return;
+
+    const textEl = item.querySelector('.memory-item__text');
+    const oldText = textEl ? textEl.textContent : '';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'memory-edit';
+    wrap.innerHTML = `
+        <input type="text" value="${escapeAudioText(oldText)}" aria-label="修改记忆内容">
+        <button type="button" class="is-primary">保存</button>
+        <button type="button" data-act="cancel">取消</button>
+    `;
+
+    const input = wrap.querySelector('input');
+    const restore = () => {
+        wrap.remove();
+        if (textEl) textEl.hidden = false;
+    };
+
+    if (textEl) textEl.hidden = true;
+    item.appendChild(wrap);
+    input.focus({ preventScroll: true });
+    input.select();
+
+    const save = async () => {
+        const next = input.value.trim();
+        if (!next) {
+            showNotification('不能改成空的，要删就用 ×', 'info', 2200);
+            return;
+        }
+        if (next === oldText) {
+            restore();
+            return;
+        }
+        try {
+            const res = await eel.update_memory(id, next)();
+            if (res && res.success) {
+                restore();
+                if (textEl) textEl.textContent = next;
+                item.dataset.text = next.toLowerCase();
+                if (textEl) textEl.title = next;
+                item.classList.add('is-updated');
+                setTimeout(() => item.classList.remove('is-updated'), 1500);
+                showNotification('改好了。她下次想起来的就是这句', 'success', 2400);
+            } else {
+                showNotification('没改成，再试一次', 'error');
+            }
+        } catch (e) {
+            console.error('修改记忆失败:', e);
+            showNotification('没改成，再试一次', 'error');
+        }
+    };
+
+    wrap.querySelector('.is-primary').addEventListener('click', save);
+    wrap.querySelector('[data-act="cancel"]').addEventListener('click', restore);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            save();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            restore();
+        }
+    });
+}
+
+/** 记忆搜索：本地过滤，不打接口 */
+function filterMemoryList() {
+    const box = document.getElementById('memorySearch');
+    const list = document.getElementById('memoryList');
+    if (!list) return;
+    const q = (box && box.value || '').trim().toLowerCase();
+
+    list.querySelectorAll('.memory-item').forEach(item => {
+        if (!q) {
+            item.hidden = false;
+            return;
+        }
+        const text = item.dataset.text || item.textContent.toLowerCase();
+        item.hidden = text.indexOf(q) < 0;
+    });
+
+    // 全被过滤掉时给一句解释，别让人以为列表坏了
+    const any = Array.from(list.querySelectorAll('.memory-item')).some(i => !i.hidden);
+    let tip = list.querySelector('.memory-filter-empty');
+    if (!any && q) {
+        if (!tip) {
+            tip = document.createElement('p');
+            tip.className = 'memory-empty memory-filter-empty';
+            tip.textContent = '没有含这几个字的记忆。';
+            list.appendChild(tip);
+        }
+    } else if (tip) {
+        tip.remove();
+    }
+}
+
+async function toggleDailyLife(enabled) {
+    try {
+        const res = await eel.save_proactive_settings({ daily_life_enabled: !!enabled })();
+        if (res && res.success) {
+            showNotification(enabled ? '她会继续记自己的日子' : '她不再记自己的日子了',
+                'success', 2200);
+            if (enabled && typeof refreshChamberNow === 'function') refreshChamberNow();
+        }
+    } catch (e) {
+        console.error(e);
+        showNotification('设置失败', 'error');
     }
 }
 
@@ -1054,6 +1185,9 @@ async function tidyMemories() {
 window.loadMemoryList = loadMemoryList;
 window.forgetMemory = forgetMemory;
 window.tidyMemories = tidyMemories;
+window.editMemory = editMemory;
+window.filterMemoryList = filterMemoryList;
+window.toggleDailyLife = toggleDailyLife;
 
 async function openSettings() {
     try {
@@ -1150,6 +1284,34 @@ async function openSettings() {
                     <label class="switch">
                         <input type="checkbox" id="settingAvatarSwitch" ${appState.avatarVisible ? 'checked' : ''}
                                onchange="toggleAvatarVisibility(); updateUIFromState();">
+                        <span class="switch__thumb"></span>
+                    </label>
+                </div>
+
+                <div class="switch-row">
+                    <div>
+                        <div class="switch-label">她会先开口</div>
+                        <div class="switch-desc">很久没说话时，她会自己找话题来找你。想安静就关着</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="settingProactiveSwitch" ${settings.proactive_enabled ? 'checked' : ''}
+                               onchange="toggleProactive(this.checked)">
+                        <span class="switch__thumb"></span>
+                    </label>
+                </div>
+
+                <div class="proactive-card" id="proactiveCardBody">
+                    <p class="form-hint">读取中…</p>
+                </div>
+
+                <div class="switch-row">
+                    <div>
+                        <div class="switch-label">她有自己的日子</div>
+                        <div class="switch-desc">她会记下今天做了什么，你问「你在干嘛」时答得具体。关掉就只记对话</div>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="settingLifeSwitch" ${settings.daily_life_enabled !== false ? 'checked' : ''}
+                               onchange="toggleDailyLife(this.checked)">
                         <span class="switch__thumb"></span>
                     </label>
                 </div>
@@ -1324,6 +1486,11 @@ async function openSettings() {
                         <button class="memory-chip" type="button"
                                 onclick="setMemoryScope('conv', this)">这段对话</button>
                     </div>
+                    <div class="memory-search">
+                        <svg class="icon" viewBox="0 0 24 24"><use href="#i-search"></use></svg>
+                        <input type="text" id="memorySearch" placeholder="找一条…"
+                               aria-label="在记忆里找" oninput="filterMemoryList()">
+                    </div>
                     <div id="memoryList" class="memory-list"></div>
                     <div class="settings-grid" style="margin-top: 10px;">
                         <button class="btn btn-ghost" type="button" onclick="loadMemoryList()">刷新</button>
@@ -1358,6 +1525,8 @@ async function openSettings() {
         if (modalContent) {
             modalContent.addEventListener('click', (e) => e.stopPropagation());
         }
+
+        if (typeof renderProactiveCard === 'function') renderProactiveCard();
 
         window.updateSettingsUI = () => {
             const voiceSwitch = document.getElementById('settingVoiceSwitch');

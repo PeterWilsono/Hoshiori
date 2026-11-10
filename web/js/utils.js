@@ -211,7 +211,19 @@ function showNotification(message, type = 'info', duration = 3000) {
     const notification = document.createElement('div');
     notification.className = `notification ${type}`;
     notification.setAttribute('role', 'status');
-    notification.textContent = message;
+
+    // 一个小圆点标记：同一时间弹两条（一条成功一条失败）时，
+    // 光看文字要读两遍，看颜色一眼就分得清。
+    const mark = document.createElement('span');
+    mark.className = 'notification__mark';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = type === 'success' ? '✓' : (type === 'error' ? '!' : '·');
+    notification.appendChild(mark);
+
+    const label = document.createElement('span');
+    label.className = 'notification__text';
+    label.textContent = message;
+    notification.appendChild(label);
 
     layer.appendChild(notification);
 

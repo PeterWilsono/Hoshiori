@@ -198,7 +198,7 @@
     flex: 0 0 auto;
     padding: 2px 6px;
     border-radius: 6px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--ink-4);
     background: var(--fill-1, rgba(0, 0, 0, 0.04));
 }
@@ -216,7 +216,7 @@
     flex: 0 0 auto;
     padding: 2px 6px;
     border-radius: 6px;
-    font-size: 10.5px;
+    font-size: 12px;
     letter-spacing: 0.02em;
     color: var(--accent);
     background: var(--accent-wash);
@@ -279,7 +279,7 @@
 }
 
 .bond-card__label {
-    font-size: 11px;
+    font-size: 12px;
     letter-spacing: 0.14em;
     color: var(--ink-4);
 }
@@ -352,7 +352,9 @@
 }
 
 .message-bubble.ai.is-cont {
-    margin-top: -2px;
+    /* 续句要读起来像「同一段话换行」，而不是新的一段。
+       父容器的 gap 是 12px，这里再拉回 14px，实际间距落到 18px 上下。 */
+    margin-top: -14px;
 }
 
 .msg-rule {
@@ -396,7 +398,7 @@
     flex: 0 0 auto;
     margin-left: 2px;
     font-family: var(--font-num);
-    font-size: 10px;
+    font-size: 11.5px;
     letter-spacing: 0.12em;
     color: var(--ink-4);
     font-variant-numeric: tabular-nums;
@@ -580,7 +582,7 @@
     right: 4px;
     bottom: -18px;
     font-family: var(--font-num);
-    font-size: 9.5px;
+    font-size: 11.5px;
     letter-spacing: 0.12em;
     color: var(--ink-4);
     opacity: 0;
@@ -598,7 +600,7 @@
     max-width: 80%;
     padding: 0;
     text-align: center;
-    font-size: 11px;
+    font-size: 12px;
     letter-spacing: 0.1em;
     color: var(--ink-4);
     animation: fade-rise var(--dur-2) var(--ease) both;
@@ -641,7 +643,7 @@
 
 .typing-label {
     margin-left: 11px;
-    font-size: 10.5px;
+    font-size: 12px;
     letter-spacing: 0.16em;
     color: var(--ink-4);
     vertical-align: 2px;
@@ -725,7 +727,7 @@
 
 .welcome__eyebrow {
     font-family: var(--font-num);
-    font-size: 9.5px;
+    font-size: 11.5px;
     letter-spacing: 0.4em;
     text-transform: uppercase;
     color: var(--ink-4);
@@ -831,7 +833,7 @@
 }
 
 .welcome__resume-label {
-    font-size: 10px;
+    font-size: 11.5px;
     letter-spacing: 0.16em;
     color: var(--ink-3);
 }
@@ -1049,7 +1051,7 @@
     margin-top: 12px;
     padding-top: 12px;
     border-top: 1px solid var(--line-faint);
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.8;
     letter-spacing: 0.02em;
     color: var(--ink-3);
@@ -1199,7 +1201,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     direction: rtl;
     text-align: left;
 }
@@ -1235,7 +1237,7 @@
     align-items: center;
     gap: 10px;
     margin-bottom: 16px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     letter-spacing: 0.18em;
     text-transform: uppercase;
@@ -1271,7 +1273,7 @@
 .form-label {
     display: block;
     margin-bottom: 8px;
-    font-size: 11px;
+    font-size: 12px;
     letter-spacing: 0.1em;
     color: var(--ink-3);
 }
@@ -1364,7 +1366,7 @@
 
 .form-hint {
     margin-top: 7px;
-    font-size: 10.5px;
+    font-size: 12px;
     line-height: 1.7;
     letter-spacing: 0.03em;
     color: var(--ink-4);
@@ -1412,7 +1414,7 @@
 
 .switch-desc {
     margin-top: 3px;
-    font-size: 10.5px;
+    font-size: 12px;
     line-height: 1.6;
     color: var(--ink-4);
 }
@@ -1536,7 +1538,7 @@
     align-items: center;
     gap: 5px;
     font-family: var(--font-num);
-    font-size: 10.5px;
+    font-size: 12px;
     letter-spacing: 0.08em;
     color: var(--ink-3);
     font-variant-numeric: tabular-nums;
@@ -1548,13 +1550,14 @@
 
 .conversation-meta__now {
     margin-left: 4px;
-    padding: 1px 6px;
+    padding: 2px 7px;
     border-radius: var(--r-pill);
     background: var(--accent-wash);
     color: var(--accent);
     font-family: var(--font-sans);
-    font-size: 9px;
-    letter-spacing: 0.12em;}
+    font-size: 12px;
+    letter-spacing: 0.06em;
+}
 
 .conversation-item.is-removing {
     opacity: 0;
@@ -1660,7 +1663,7 @@
 .theme-name em {
     font-family: var(--font-num);
     font-style: normal;
-    font-size: 9.5px;
+    font-size: 11.5px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--ink-3);
@@ -1743,7 +1746,7 @@
     display: block;
     margin-top: 3px;
     font-family: var(--font-num);
-    font-size: 9.5px;
+    font-size: 11.5px;
     letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--ink-4);
@@ -1751,13 +1754,13 @@
 
 .pick-item__flag {
     flex: none;
-    font-size: 9.5px;
+    font-size: 11.5px;
     letter-spacing: 0.16em;
     color: var(--accent);
 }
 
 .theme-description {
-    font-size: 10.5px;
+    font-size: 12px;
     letter-spacing: 0.05em;
     line-height: 1.6;
     color: var(--ink-4);
@@ -1963,7 +1966,7 @@
 .continuity-tag {
     padding: 1px 6px;
     border-radius: var(--r-pill);
-    font-size: 9.5px;
+    font-size: 11.5px;
     letter-spacing: 0.1em;
     color: var(--accent);
     background: var(--fill-2, rgba(0, 0, 0, 0.05));
@@ -1978,17 +1981,17 @@
 
 .continuity-foot {
     margin: 4px 0 0;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.7;
     color: var(--ink-4);
 }
 
 .conversation-meta__break {
     margin-left: 4px;
-    padding: 1px 6px;
+    padding: 2px 7px;
     border-radius: var(--r-pill);
     background: var(--fill-2, rgba(0, 0, 0, 0.05));
     color: var(--ink-4);
-    font-size: 9px;
-    letter-spacing: 0.1em;
+    font-size: 12px;
+    letter-spacing: 0.04em;
 }

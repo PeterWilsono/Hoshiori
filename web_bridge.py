@@ -17,6 +17,7 @@ from datetime import datetime
 
 import app_paths
 import boot
+import db
 import window_shell
 import document_reader
 
@@ -249,9 +250,21 @@ class WebBridge:
                 current_id = self.app.conversation_manager.current_conversation_id
 
                 for conv_id, conv_data in self.app.conversation_manager.conversations.items():
+                    title = _display_title(conv_data)
+                    # 「对话 2 - 2026-11-08 17:30」这种是迁移时留下的占位标题，
+                    # 列表和历史弹窗里全是它，很难认。用第一句话替掉。
+                    if not title or re.match(r'^对话\s*\d+', title or ''):
+                        try:
+                            first = self.app.conversation_manager.conv_store \
+                                .first_user_message(conv_id)
+                        except Exception:
+                            first = ""
+                        if first:
+                            first = re.sub(r"\s+", " ", first).strip()
+                            title = first[:22] + ('…' if len(first) > 22 else '')
                     convs.append({
                         'id': str(conv_id),
-                        'title': _display_title(conv_data),
+                        'title': title,
                         'timestamp': _to_epoch(conv_data.get('last_interaction_time')),
                         'message_count': conv_data.get(
                             'message_count', len(conv_data.get('messages', []))),
@@ -389,6 +402,14 @@ class WebBridge:
             """前端画出第一帧了：把启动图撤掉，用户可以开始用了"""
             boot.log("前端就绪")
             close_splash("前端就绪")
+
+            # 她的生活 + 主动消息的定时器。放在语音预热之前——
+            # 语音初始化偶尔会卡住音频设备，一卡就把后面全堵住了。
+            try:
+                self.app.start_background_services()
+            except Exception as exc:
+                print("⚠️ 后台服务启动失败: %s" % exc)
+
             # 界面可以用了，再在后台把发请求要用的库热起来
             try:
                 from api_handler import prewarm_http
@@ -458,6 +479,166 @@ class WebBridge:
             except Exception as e:
                 print(f"删除记忆失败: {e}")
                 return False
+
+        @eel.expose
+        def truncate_from(msg_id):
+            """把这条消息和它之后的都删掉（编辑重发）。"""
+            try:
+                removed = self.app.conversation_manager.truncate_from(int(msg_id))
+                return {"success": removed >= 0, "removed": removed}
+            except Exception as e:
+                print("截断消息失败: %s" % e)
+                return {"success": False, "error": str(e)}
+
+        @eel.expose
+        def update_memory(mem_id, content):
+            """改一条记忆。她记错的时候，改比删好——别把对的那半也丢了。"""
+            try:
+                ok = self.app.conversation_manager.memory_store.edit(
+                    int(mem_id), content)
+                return {"success": bool(ok)}
+            except Exception as e:
+                print("修改记忆失败: %s" % e)
+                return {"success": False, "error": str(e)}
+
+        @eel.expose
+        def search_messages(query, limit=40):
+            """全库搜聊天记录。
+
+            跨所有对话，包括已经切走的那几段——"那次他说过什么来着"这种问题，
+            没有搜索就只能一段段翻。
+            """
+            query = (query or "").strip()
+            if len(query) < 1:
+                return []
+
+            try:
+                conn = db.connect(self.app.conversation_manager.db_path)
+                conn.row_factory = None
+                pattern = "%" + query.replace("%", "").replace("_", "") + "%"
+                rows = conn.execute(
+                    "SELECT m.id, m.conv_id, m.role, m.content, m.created_at,"
+                    "       c.title "
+                    "FROM messages m LEFT JOIN conversations c ON c.id = m.conv_id "
+                    "WHERE m.content LIKE ? "
+                    "ORDER BY m.id DESC LIMIT ?",
+                    (pattern, int(limit))
+                ).fetchall()
+                conn.close()
+            except Exception as e:
+                print("搜索消息失败: %s" % e)
+                return []
+
+            # 标题要用"这段对话的第一句话"，而不是库里的默认名。
+            # 一次性把涉及到的对话的首句捞出来，别每条都查一遍。
+            firsts = {}
+            conv_ids = sorted({r[1] for r in rows if r[1] is not None})
+            if conv_ids:
+                try:
+                    conn2 = db.connect(self.app.conversation_manager.db_path)
+                    conn2.row_factory = None
+                    marks = ",".join("?" * len(conv_ids))
+                    for row in conn2.execute(
+                        "SELECT conv_id, content FROM messages "
+                        "WHERE conv_id IN (%s) AND role='user' AND id=("
+                        "  SELECT MIN(id) FROM messages b "
+                        "  WHERE b.conv_id = messages.conv_id AND b.role='user')"
+                        % marks, conv_ids):
+                        firsts[row[0]] = row[1]
+                    conn2.close()
+                except Exception as exc:
+                    print("取对话首句失败: %s" % exc)
+
+            out = []
+            low = query.lower()
+            for r in rows:
+                msg_id, conv_id, role, content, created, title = r
+                content = content or ""
+                idx = content.lower().find(low)
+                if idx < 0:
+                    idx = 0
+                start = max(0, idx - 30)
+                snippet = content[start:start + 120].replace("\n", " ")
+                if start > 0:
+                    snippet = "…" + snippet
+                out.append({
+                    "id": msg_id,
+                    "conv_id": conv_id,
+                    "conv_title": _display_title({
+                        "title": title,
+                        "messages": [{"role": "user", "content": firsts.get(conv_id, "")}],
+                    }),
+                    "role": "user" if role == "user" else "ai",
+                    "snippet": snippet,
+                    "time": _to_epoch(created) if created else 0,
+                    "clock": (created or "")[11:16] or (created or "")[:16],
+                    "day": (created or "")[:10],
+                })
+            return out
+
+        @eel.expose
+        def get_daily_life():
+            """她今天。给「她今天」面板用。"""
+            try:
+                return self.app.conversation_manager.life_state()
+            except Exception as e:
+                print("读取她的生活失败: %s" % e)
+                return None
+
+        @eel.expose
+        def refresh_daily_life():
+            """手动让她"过一会儿日子"（补写一段）。"""
+            try:
+                cfg = self.app.config_manager.get_current_api_config()
+                from api_handler import APIHandler
+                handler = APIHandler(
+                    cfg["api_key"], cfg["api_endpoint"], cfg["model"],
+                    "disabled", False, cfg.get("provider", ""))
+                cm = self.app.conversation_manager
+                wrote = cm.daily_life.ensure(handler, cm.get_effective_role_prompt(),
+                                             cm.life_hints())
+                return {"success": True, "wrote": bool(wrote),
+                        "state": self.app.conversation_manager.life_state()}
+            except Exception as e:
+                print("补写她的生活失败: %s" % e)
+                return {"success": False, "error": str(e)}
+
+        @eel.expose
+        def get_proactive_status():
+            try:
+                return self.app.proactive_status()
+            except Exception as e:
+                return {"enabled": False, "why": str(e)}
+
+        @eel.expose
+        def fire_proactive():
+            """「现在让她说一句」——绕过间隔和上限，用户手动点的。"""
+            try:
+                return self.app.proactive_fire(force=True)
+            except Exception as e:
+                print("主动消息触发失败: %s" % e)
+                return {"ok": False, "reason": str(e)}
+
+        @eel.expose
+        def save_proactive_settings(payload):
+            """主动消息的开关与节奏。"""
+            try:
+                cfg = self.app.config_manager
+                if "enabled" in payload:
+                    cfg.proactive_enabled = bool(payload["enabled"])
+                if "gap_hours" in payload:
+                    cfg.proactive_gap_hours = max(0.5, float(payload["gap_hours"]))
+                if "daily_cap" in payload:
+                    cfg.proactive_daily_cap = max(1, min(6, int(payload["daily_cap"])))
+                if "quiet" in payload:
+                    cfg.proactive_quiet = str(payload["quiet"])[:20]
+                if "daily_life_enabled" in payload:
+                    cfg.daily_life_enabled = bool(payload["daily_life_enabled"])
+                cfg.save_config()
+                return {"success": True, "status": self.app.proactive_status()}
+            except Exception as e:
+                print("保存主动消息设置失败: %s" % e)
+                return {"success": False, "error": str(e)}
 
         @eel.expose
         def tidy_memories():
@@ -764,6 +945,12 @@ class WebBridge:
                         'tts_fish_key': getattr(cm, 'tts_fish_key', ''),
                         'tts_local_url': getattr(cm, 'tts_local_url', ''),
                         'tts_emotion': bool(getattr(cm, 'tts_emotion', True)),
+                        # 她会不会先开口、有没有自己的日子
+                        'proactive_enabled': bool(getattr(cm, 'proactive_enabled', False)),
+                        'daily_life_enabled': bool(getattr(cm, 'daily_life_enabled', True)),
+                        'proactive_gap_hours': float(getattr(cm, 'proactive_gap_hours', 6) or 6),
+                        'proactive_daily_cap': int(getattr(cm, 'proactive_daily_cap', 2) or 2),
+                        'proactive_quiet': getattr(cm, 'proactive_quiet', '23:30-07:30'),
                     }
 
                 if mode == "local":
@@ -1026,6 +1213,10 @@ class WebBridge:
     def update_ai_response(self, content):
         """更新AI回复到Web"""
         self.send_to_web('receiveAIResponse', content)
+
+    def push_proactive(self, content):
+        """她会先开口：这条不是回你，是她自己找上来的。"""
+        self.send_to_web('pushProactive', content)
 
     def append_ai_response(self, extra):
         """把一小段补充（比如结尾的 emoji）接到上一条气泡后面"""
@@ -1297,6 +1488,8 @@ JS_CALLBACKS = (
     'stopAvatarTalking',
     'receiveAIResponse',
     'appendAIResponse',
+    'pushProactive',
+    'lifeUpdated',
     'applyThemeFromPython',
 )
 

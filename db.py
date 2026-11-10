@@ -18,7 +18,7 @@ from datetime import datetime
 __all__ = ["connect", "init_db", "now_str", "bigrams", "build_match_query",
            "concepts_of", "concept_terms", "SCHEMA_VERSION"]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -43,7 +43,9 @@ CREATE TABLE IF NOT EXISTS messages (
     role       TEXT NOT NULL,
     content    TEXT NOT NULL,
     created_at TEXT,
-    tokens     INTEGER DEFAULT 0
+    tokens     INTEGER DEFAULT 0,
+    -- 'proactive' = 她主动开口的那条；空 = 普通回复
+    kind       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conv_id, id);
 
@@ -88,6 +90,21 @@ CREATE TABLE IF NOT EXISTS user_state (
     id         INTEGER PRIMARY KEY CHECK (id = 1),
     psych_core TEXT,
     updated_at TEXT
+);
+
+-- 她自己的日子。一天一行，entries 是这一天里若干条「几点在做什么」。
+-- 按天存而不是按次存，是因为她要能回答「你今天上午干嘛了」这类问题，
+-- 而不是只有「刚才在做什么」。
+CREATE TABLE IF NOT EXISTS daily_life (
+    day        TEXT PRIMARY KEY,
+    weather    TEXT,
+    mood       TEXT,
+    entries    TEXT,
+    thought    TEXT,
+    thought_used INTEGER DEFAULT 0,
+    gen_count  INTEGER DEFAULT 0,
+    gen_at     TEXT,
+    created_at TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(search);
@@ -144,6 +161,10 @@ def _migrate(conn):
                        ("embedding", "BLOB")):
         if name not in cols:
             conn.execute("ALTER TABLE memories ADD COLUMN %s %s" % (name, decl))
+
+    mcols = _columns(conn, "messages")
+    if "kind" not in mcols:
+        conn.execute("ALTER TABLE messages ADD COLUMN kind TEXT")
 
     ccols = _columns(conn, "conversations")
     if "continuity" not in ccols:

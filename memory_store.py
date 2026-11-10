@@ -669,6 +669,50 @@ class MemoryStore:
                 self._conn.commit()
             return len(ids)
 
+    def edit(self, mem_id, content):
+        """改一条记忆的内容。
+
+        以前只能删，"她记错了"的唯一办法是让她忘掉，代价是把对的那半也丢了。
+        改的时候三样东西要一起换：正文、全文索引、向量。少一样检索就会漏。
+        """
+        content = (content or "").strip()
+        if not content:
+            return False
+        tokens = _tokens(content)
+        if not tokens:
+            return False
+
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM memories WHERE id=?", (mem_id,)).fetchone()
+            if row is None:
+                return False
+
+            concept = ",".join(sorted(db.concepts_of(content)))
+            self._conn.execute(
+                "UPDATE memories SET content=?, search=?, concept=?, updated_at=?"
+                " WHERE id=?",
+                (content, " ".join(sorted(tokens)), concept, db.now_str(), mem_id))
+            self._index(mem_id, content, tokens)
+            self._conn.commit()
+
+            scope, conv_id = row["scope"], row["conv_id"]
+
+        # 向量重算放到锁外（编码要几十毫秒，别卡住检索）
+        try:
+            vec = self._embed_one(content)
+            if vec is not None:
+                with self._lock:
+                    self._conn.execute(
+                        "UPDATE memories SET embedding=? WHERE id=?",
+                        (vec.astype("float32").tobytes(), mem_id))
+                    self._conn.commit()
+                    self._vec_put(mem_id, vec, scope, conv_id)
+        except Exception as exc:
+            print("⚠️ 记忆向量重算失败: %s" % exc)
+
+        return True
+
     def forget(self, mem_id):
         with self._lock:
             self._conn.execute("DELETE FROM memories WHERE id=?", (mem_id,))

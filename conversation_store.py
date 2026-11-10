@@ -229,22 +229,24 @@ class ConversationStore:
         with self._lock:
             if limit:
                 rows = self._conn.execute(
-                    "SELECT id, role, content FROM messages WHERE conv_id=? "
-                    "ORDER BY id DESC LIMIT ?", (conv_id, limit)
+                    "SELECT id, role, content, created_at, kind FROM messages "
+                    "WHERE conv_id=? ORDER BY id DESC LIMIT ?", (conv_id, limit)
                 ).fetchall()
                 rows = list(reversed(rows))
             else:
                 rows = self._conn.execute(
-                    "SELECT id, role, content FROM messages WHERE conv_id=? ORDER BY id",
-                    (conv_id,)
+                    "SELECT id, role, content, created_at, kind FROM messages "
+                    "WHERE conv_id=? ORDER BY id", (conv_id,)
                 ).fetchall()
-        return [{"role": r["role"], "content": r["content"]} for r in rows]
+        return [{"id": r["id"], "role": r["role"], "content": r["content"],
+                 "created_at": r["created_at"], "kind": r["kind"]} for r in rows]
 
-    def append_message(self, conv_id, role, content, tokens=0):
+    def append_message(self, conv_id, role, content, tokens=0, kind=None):
         with self._lock:
             cur = self._conn.execute(
-                "INSERT INTO messages(conv_id, role, content, created_at, tokens)"
-                " VALUES(?,?,?,?,?)", (conv_id, role, content, db.now_str(), tokens)
+                "INSERT INTO messages(conv_id, role, content, created_at, tokens, kind)"
+                " VALUES(?,?,?,?,?,?)",
+                (conv_id, role, content, db.now_str(), tokens, kind)
             )
             self._conn.execute(
                 "UPDATE conversations SET message_count=message_count+1,"
@@ -253,6 +255,41 @@ class ConversationStore:
             )
             self._conn.commit()
             return cur.lastrowid
+
+    def first_user_message(self, conv_id):
+        """这段对话的第一句人话。老数据的标题是「对话 N - 日期」，
+        列表里看着全是文件名，用这句替掉。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT content FROM messages WHERE conv_id=? AND role='user' "
+                "ORDER BY id LIMIT 1", (conv_id,)).fetchone()
+        return (row["content"] if row else "") or ""
+
+    def truncate_from(self, conv_id, msg_id):
+        """删掉这条之后的所有消息（含这条）。
+
+        "改一下重发"要真的替换，而不是在旧的那条下面再叠一条——否则对话里会
+        留下两个版本，她自己读历史时也会被绕进去。
+        返回被删的条数；msg_id 不属于这个对话时返回 -1。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM messages WHERE id=? AND conv_id=?",
+                (msg_id, conv_id)).fetchone()
+            if row is None:
+                return -1
+            cur = self._conn.execute(
+                "DELETE FROM messages WHERE conv_id=? AND id>=?", (conv_id, msg_id))
+            removed = cur.rowcount or 0
+            self._conn.execute(
+                "UPDATE conversations SET message_count=(SELECT COUNT(*) FROM messages"
+                " WHERE conv_id=?) WHERE id=?", (conv_id, conv_id))
+            # 摘要里可能覆盖了被删掉的段落，一起清掉，下次会重新压
+            self._conn.execute(
+                "DELETE FROM summaries WHERE conv_id=? AND covered_upto>=?",
+                (conv_id, msg_id))
+            self._conn.commit()
+            return removed
 
     def messages_to_summarize(self, conv_id, keep_recent=20, batch=24):
         """还没被摘要覆盖、又不在"最近保留区"里的旧消息。"""

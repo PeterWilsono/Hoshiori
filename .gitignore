@@ -75,3 +75,6 @@ app_icon.png
 
 # 打包用的浏览器运行时
 runtime/
+
+# 迁移前的旧存档（数据已经进 SQLite）
+conversations.json

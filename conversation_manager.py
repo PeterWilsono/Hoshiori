@@ -15,6 +15,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Any  # ⭐ 添加这行导入
 import random
+import db
 from memory_manager import MemoryManager
 from memory_store import MemoryStore
 from conversation_store import ConversationStore
@@ -23,6 +24,7 @@ from emotion_analyzer import EmotionAnalyzer  # ⭐ 新增
 from vector_memory import DynamicMemoryGraph  # ⭐ 新增
 from cognitive_system import CognitiveEnhancementSystem  # ⭐ Phase 2
 from autonomous_system import AutonomousIntelligenceSystem  # ⭐ Phase 3
+import daily_life
 
 #: 她的性格底色。换对话不换人格——只有"认识你多久"会变。
 DEFAULT_PERSONALITY = {
@@ -95,6 +97,9 @@ class ConversationManager:
             self.memory_store.warm_up_async()
         except Exception as exc:
             print(f"⚠️ 语义索引启动失败: {exc}")
+
+        # 她自己的日子：一天一行流水，按需补写
+        self.daily_life = daily_life.get(self.db_path)
 
         # 初始化记忆管理器（保留旧的抽取/压缩工具，供兼容与摘要使用）
         self.memory_manager = MemoryManager(max_tokens=3000)
@@ -363,13 +368,8 @@ class ConversationManager:
         except:
             hours_passed = 0
         
-        # ⭐ 生成离线生活状态(如果时间足够长)
-        if hours_passed >= 2:
-            offline_life = self.generate_offline_life(hours_passed, datetime.now())
-            if offline_life:
-                # 存储到对话中,供下次API调用使用
-                conv['offline_life_pending'] = offline_life
-                print(f"🌟 生成离线生活: {offline_life}")
+        # 她这段时间过的日子由 daily_life 记着，不在这里编模板。
+        # 补写放在后台（ensure_life_async），因为它要调一次模型。
         
         # 情绪按半衰期回到她自己的基线（而不是一律归零）
         if hours_passed > 0.25:
@@ -457,17 +457,59 @@ class ConversationManager:
         return core
     
     def get_offline_life_status(self) -> str:
+        """她今天过成什么样，拼成一段给提示词。
+
+        名字沿用旧的（main.py 在调），内容换成了真实流水。没有流水就返回空，
+        让她别凭空编「我刚在看书」。
         """
-        ⭐ 获取待使用的离线生活状态
-        
-        Returns:
-            离线生活描述,如果没有则返回空字符串
-        """
-        if not self.current_conversation_id:
+        try:
+            return self.daily_life.prompt_block()
+        except Exception as exc:
+            print("⚠️ 读取她的生活失败: %s" % exc)
             return ""
-        
-        conv = self.conversations[self.current_conversation_id]
-        return conv.get('offline_life_pending', '')
+
+    def life_state(self):
+        """前端「她今天」面板用。"""
+        try:
+            return self.daily_life.current()
+        except Exception as exc:
+            print("⚠️ 读取她的生活失败: %s" % exc)
+            return None
+
+    def life_hints(self, k=6):
+        """写她的日子时，要提到你的什么。只用她确定记得的，不现编。"""
+        if not self.current_conversation_id:
+            return []
+        out = []
+        try:
+            for m in self.memory_store.pinned(
+                    self.current_conversation_id, k, scopes=self.memory_scopes()):
+                c = (m.get("content") or "").strip()
+                if c and c not in out:
+                    out.append(c)
+        except Exception:
+            pass
+        try:
+            for item in self.memory_store.timeline(
+                    self.current_conversation_id, scopes=self.memory_scopes(),
+                    days=30, k=4):
+                c = (item.get("content") or "").strip()
+                if c and c not in out:
+                    out.append(c)
+        except Exception:
+            pass
+        return out[:k]
+
+    def ensure_life_async(self, api_handler):
+        """后台补写她今天过的日子。不挡回复，没有模型时退回本地素材。"""
+        try:
+            self.daily_life.ensure_async(
+                api_handler,
+                role_prompt=self.get_effective_role_prompt(),
+                hints=self.life_hints(),
+            )
+        except Exception as exc:
+            print("⚠️ 生活补写排队失败: %s" % exc)
     
     def get_emotion_trigger_context(self) -> str:
         """
@@ -1041,19 +1083,34 @@ class ConversationManager:
             return self.conversations.get(self.current_conversation_id)
         return None
     
-    def add_message(self, role, content):
+    def add_message(self, role, content, kind=None):
         """添加消息到当前对话：内存里留一份，同时落库（O(1)，不重写整份文件）"""
         if not self.current_conversation_id:
             return
         conv = self.conversations[self.current_conversation_id]
         self._ensure_messages_loaded(self.current_conversation_id)
-        conv.setdefault('messages', []).append({"role": role, "content": content})
-        conv['message_count'] = conv.get('message_count', 0) + 1
         try:
             tokens = self.memory_manager.estimate_tokens(content)
         except Exception:
             tokens = 0
-        self.conv_store.append_message(self.current_conversation_id, role, content, tokens)
+
+        # 先落库拿 id，再放进内存：前面发出去的气泡靠这个 id 才能被
+        # 搜索定位到、才能"改一下重发"。拿不到 id（异常）也不影响显示。
+        msg_id = None
+        try:
+            msg_id = self.conv_store.append_message(
+                self.current_conversation_id, role, content, tokens, kind=kind)
+        except Exception as exc:
+            print("⚠️ 消息落库失败: %s" % exc)
+
+        conv.setdefault('messages', []).append({
+            "id": msg_id,
+            "role": role,
+            "content": content,
+            "created_at": db.now_str(),
+            "kind": kind,
+        })
+        conv['message_count'] = conv.get('message_count', 0) + 1
 
         # 第一句用户消息顺手当标题，列表里就不用再去翻消息了
         if role == "user" and conv.get('message_count', 0) == 1:
@@ -1157,6 +1214,26 @@ class ConversationManager:
             self.conv_store.save_meta(self.current_conversation_id, conv)
         except Exception as e:
             print(f"✗ 保存失败: {e}")
+
+    def truncate_from(self, msg_id):
+        """从某条消息起全部作废（编辑重发用）。"""
+        conv_id = self.current_conversation_id
+        if not conv_id:
+            return -1
+        try:
+            removed = self.conv_store.truncate_from(conv_id, int(msg_id))
+        except Exception as exc:
+            print("⚠️ 截断消息失败: %s" % exc)
+            return -1
+        conv = self.conversations.get(conv_id)
+        if conv is not None:
+            try:
+                conv['messages'] = self.conv_store.load_messages(conv_id)
+                conv['message_count'] = len(conv['messages'])
+            except Exception:
+                conv['messages'] = []
+            self._hist_offset = 0
+        return removed
 
     def _ensure_messages_loaded(self, conv_id):
         """消息按需从库里读，不在内存里堆所有对话的历史。"""

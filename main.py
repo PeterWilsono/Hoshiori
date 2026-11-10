@@ -64,6 +64,53 @@ from web_bridge import start_web_app
 boot_log("业务模块加载完成")
 
 
+def _balanced_json(text, must_have=("appraisal", "dominant_emotion", "relationship_delta")):
+    """从回复里挖出心理状态 JSON：优先代码块，其次按括号配平。
+
+    用配平而不是正则，是因为这个 JSON 是嵌套的（appraisal 本身是个对象），
+    非贪婪正则会在内层 } 处截断，解析必然失败，情绪就白算了。
+    """
+    if not text:
+        return None, None
+
+    m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1)), m.group(0)
+        except Exception:
+            pass
+
+    for start, ch in enumerate(text):
+        if ch != "{":
+            continue
+        depth, in_str, esc = 0, False, False
+        for i in range(start, len(text)):
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    block = text[start:i + 1]
+                    if any(k in block for k in must_have):
+                        try:
+                            return json.loads(block), block
+                        except Exception:
+                            pass
+                    break
+    return None, None
+
+
 class AIChatAppWeb:
     """星织AI助手 - Web版本"""
     
@@ -109,6 +156,10 @@ class AIChatAppWeb:
         
         # Web桥接（稍后由web_bridge设置）
         self.web_bridge = None
+
+        # 主动消息调度器（web 起好之后再启动）
+        self.proactive = None
+        self._bg_started = False
         
         # 如果没有对话，创建新对话
         if not self.conversation_manager.conversations:
@@ -180,6 +231,56 @@ class AIChatAppWeb:
             print(f"❌ 加载对话失败: {e}")
             return False
     
+    # ---------------------------------------------------------------- 后台
+    def start_background_services(self):
+        """页面起来之后再做：写她今天的生活、开主动消息的定时器。
+
+        放这儿而不是 __init__，是因为这两件事都要调模型；启动时先让窗口出来，
+        用户看到界面再慢慢补，比转圈等 3 秒强。
+        """
+        if self._bg_started:
+            return
+        self._bg_started = True
+
+        # 主动消息的定时器先起来：它只是看表，很轻，不会被网络拖住
+        try:
+            import proactive
+            self.proactive = proactive.ProactiveScheduler(self)
+            self.proactive.start()
+        except Exception as exc:
+            print("⚠️ 主动消息启动失败: %s" % exc)
+
+        def warm_life():
+            # 补她今天的生活：这是她"有自己的一天"的地基。要调一次模型，
+            # 所以单独一个线程——它慢不能拖累上面那个定时器。
+            try:
+                if getattr(self.config_manager, "daily_life_enabled", True):
+                    cfg = self.config_manager.get_current_api_config()
+                    handler = APIHandler(
+                        cfg["api_key"], cfg["api_endpoint"], cfg["model"],
+                        "disabled", False, cfg.get("provider", ""))
+                    self.conversation_manager.ensure_life_async(handler)
+            except Exception as exc:
+                print("⚠️ 生活预热失败: %s" % exc)
+
+        threading.Thread(target=warm_life, daemon=True).start()
+
+    def proactive_fire(self, force=True):
+        """前端「现在让她说一句」/ 定时器共用。"""
+        if self.proactive is None:
+            try:
+                import proactive
+                self.proactive = proactive.ProactiveScheduler(self)
+            except Exception as exc:
+                return {"ok": False, "reason": "调度器不可用: %s" % exc}
+        return self.proactive.fire(force=force)
+
+    def proactive_status(self):
+        if self.proactive is None:
+            return {"enabled": bool(getattr(self.config_manager, "proactive_enabled", False)),
+                    "why": "还没起来，稍等一会儿再刷新"}
+        return self.proactive.status()
+
     def process_message(self, user_input):
         """
         处理用户消息
@@ -277,13 +378,11 @@ class AIChatAppWeb:
             emotion_trigger = self.conversation_manager.get_emotion_trigger_context()
             
             # 6. 检测情绪过载
+            mood_note = ""
             overload_status = self.conversation_manager.detect_emotion_overload()
             if overload_status["overloaded"]:
                 print(f"⚠️  情绪过载检测: {overload_status['suggestion']}")
-                if offline_life:
-                    offline_life += f"\n\n[内心感受: {overload_status['suggestion']}]"
-                else:
-                    offline_life = f"[内心感受: {overload_status['suggestion']}]"
+                mood_note = f"[内心感受: {overload_status['suggestion']}]"
             
             # 7. 根据当前模式获取API配置
             api_config = self.config_manager.get_current_api_config()
@@ -298,6 +397,15 @@ class AIChatAppWeb:
                 api_config.get("provider", "")  # ⭐ 传递提供商标识，用于适配请求参数
             )
             
+            # 7.5 她这一天过到哪儿了：够久没补就后台补一段，不挡这一轮
+            if getattr(self.config_manager, "daily_life_enabled", True):
+                self.conversation_manager.ensure_life_async(self.api_handler)
+                # 补写是异步的，这一轮拿到的可能还是旧的那份——无所谓，
+                # 她要能说"我刚才在做什么"，慢一轮也比编一句强。
+                offline_life = self.conversation_manager.get_offline_life_status()
+            if mood_note:
+                offline_life = (offline_life + "\n\n" + mood_note).strip()
+
             # 8. 调用API（流式：边生成边把气泡一条条推出去）
             streamer = None
             if self.web_bridge:
@@ -453,53 +561,6 @@ class AIChatAppWeb:
 
         threading.Thread(target=run, daemon=True).start()
         return segments
-
-def _balanced_json(text, must_have=("appraisal", "dominant_emotion", "relationship_delta")):
-    """从回复里挖出心理状态 JSON：优先代码块，其次按括号配平。
-
-    用配平而不是正则，是因为这个 JSON 是嵌套的（appraisal 本身是个对象），
-    非贪婪正则会在内层 } 处截断，解析必然失败，情绪就白算了。
-    """
-    if not text:
-        return None, None
-
-    m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(1)), m.group(0)
-        except Exception:
-            pass
-
-    for start, ch in enumerate(text):
-        if ch != "{":
-            continue
-        depth, in_str, esc = 0, False, False
-        for i in range(start, len(text)):
-            c = text[i]
-            if in_str:
-                if esc:
-                    esc = False
-                elif c == "\\":
-                    esc = True
-                elif c == '"':
-                    in_str = False
-                continue
-            if c == '"':
-                in_str = True
-            elif c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-                if depth == 0:
-                    block = text[start:i + 1]
-                    if any(k in block for k in must_have):
-                        try:
-                            return json.loads(block), block
-                        except Exception:
-                            pass
-                    break
-    return None, None
-
 
     def _process_ai_response(self, raw_response):
         """处理AI原始回复，提取JSON和清理文本"""
@@ -664,10 +725,12 @@ def _balanced_json(text, must_have=("appraisal", "dominant_emotion", "relationsh
         text = re.sub(r'\b(neutral|happy|sad|angry|shy)\s*-?\d+\b', '', text, flags=re.IGNORECASE)
         text = re.sub(r'\b(neutral|happy|sad|angry|shy)\b', '', text, flags=re.IGNORECASE)
         
-        # 清理多余空格和换行
-        text = re.sub(r'\s+-?\d+\s*', ' ', text)
-        text = re.sub(r'\s+', ' ', text)
-        text = re.sub(r'\n\s*\n+', '\n', text)
+        # 清理多余空格和换行。
+        # 注意不能把 \n 压成空格：气泡之间就是用 \n 存的，
+        # 压平之后重新打开对话，一轮里的三五条会粘成一大段。
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r' *\n *', '\n', text)
+        text = re.sub(r'\n{3,}', '\n\n', text)
         
         return text.strip()
 
